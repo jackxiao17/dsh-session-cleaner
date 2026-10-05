@@ -1,0 +1,5 @@
+# dsh-session-cleaner bundle 层：插入会话清理插件行。
+- insert:
+    - id: dsh-session-cleaner
+      name: 'dsh-session-cleaner'
+      config: {}
