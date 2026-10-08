@@ -54,6 +54,26 @@
 - **迭代时顺手把版本号升一位，共两处**：`package.json` 的 `version`，以及 `lib/index.js` 里的 `buildId`。插件启动时会在日志里打印 `dsh-session-cleaner v<版本号>`，重启后一眼就能确认新版本真的生效了（2026-10 出过 `package.json` 已升、`buildId` 忘升导致日志仍显示旧版号的问题，两处务必一起改）。
 - 改动确认无误后提交推送到本仓库，保证 GitHub 上的代码和你本机跑的一致；发版时标签、Release 与 zip 包里的版本号也要跟着对齐。
 
+### 一键发版脚本
+
+`scripts/release.ps1` 是维护者工具（不参与插件运行，也不会被装进发行包——`package.json` 的 `files` 只列了 `lib`、`cordis.patch.yml`、`README.md`）。它按顺序做完这几件事：
+
+1. 校验 `package.json#version` 与 `lib/index.js#buildId` 一致（不一致直接报错，防止再出现"日志显示旧版本号"）；
+2. 打包出 `dsh-session-cleaner-<版本>.zip` 并打印 SHA256；
+3. 覆盖同步到 `~/.dsh/profiles/desktop/` 下的 `local\` 与 `node_modules\` 两处；
+4. `git commit` → 打 `v<版本>` 标签 → 推送 main 与标签；
+5. 创建 Release（标题统一为 `dsh-session-cleaner v<版本>`）并上传 zip。
+
+```powershell
+# 先干跑看一遍将要做的事（不改任何东西）
+pwsh -NoProfile -File scripts/release.ps1 -DryRun
+
+# 正式发版
+pwsh -NoProfile -File scripts/release.ps1
+```
+
+参数：`-SkipGit`、`-SkipSync`、`-SkipRelease` 可分别跳过某一步；`-Proxy ''` 关闭代理（默认走 `http://127.0.0.1:7890`）；`-Token` 或环境变量 `GH_TOKEN` 指定令牌，都没有时脚本会尝试读取 Windows 凭据管理器里 `git:https://github.com` 的令牌（只放环境变量，不打印、不进命令行历史），仍取不到则跳过 Release 创建并提示手工上传。
+
 ## 已知边界
 
 - DSH 的插件接口没有官方稳定性承诺，大版本升级后插件可能失灵——失灵表现为菜单项/按钮消失或操作报错，不会伤及会话数据
