@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-cleaner",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "description": "DSH 会话清理插件：侧栏会话「···」菜单一键移入回收站，回收站支持搜索、恢复与彻底删除（日志目录 + 记账 + 投影缓存 + 插件注解的完整清理）；对话中的会话会先结束当前回答再移入。",
   "license": "MIT",
   "keywords": [
