@@ -1,16 +1,26 @@
 {
   "name": "dsh-session-cleaner",
-  "version": "0.6.5",
-  "description": "DSH 会话清理插件：侧栏会话「···」菜单一键移入回收站，回收站支持搜索、恢复与彻底删除（日志目录 + 记账 + 投影缓存 + 插件注解的完整清理）；对话中的会话会先结束当前回答再移入。",
+  "version": "0.7.0",
+  "description": "DSH 会话清理插件：侧栏会话「···」菜单一键移入回收站，回收站支持搜索、恢复与彻底删除。删除时同步摘掉工作区记账、置顶与归档标记，并清掉投影缓存行（含备份文件）；彻底删除时再清掉绑定该会话的定时任务与空掉的工程目录。恢复时逐项还原，包括侧栏原位置。",
   "license": "MIT",
   "keywords": [
     "dsh",
     "deepseek-harness",
+    "dsh-plugin",
     "plugin",
     "session",
     "delete",
+    "recycle-bin",
     "cleaner"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jackxiao17/dsh-session-cleaner.git"
+  },
+  "homepage": "https://github.com/jackxiao17/dsh-session-cleaner#readme",
+  "bugs": {
+    "url": "https://github.com/jackxiao17/dsh-session-cleaner/issues"
+  },
   "type": "module",
   "main": "./lib/index.js",
   "exports": {
@@ -21,7 +31,8 @@
   "files": [
     "lib",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "README.en.md"
   ],
   "dsh": {
     "bundle": {

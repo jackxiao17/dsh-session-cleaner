@@ -85,7 +85,7 @@ $stage = Join-Path $env:TEMP "scl-release-stage-$version"
 $stageRoot = Join-Path $stage 'dsh-session-cleaner'
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Path (Join-Path $stageRoot 'lib') -Force | Out-Null
-foreach ($f in 'package.json', 'README.md', 'LICENSE', 'cordis.patch.yml') {
+foreach ($f in 'package.json', 'README.md', 'README.en.md', 'LICENSE', 'cordis.patch.yml') {
     Copy-Item -LiteralPath (Join-Path $repoRoot $f) -Destination $stageRoot -Force
 }
 Copy-Item -LiteralPath (Join-Path $repoRoot 'lib\client.js') -Destination (Join-Path $stageRoot 'lib') -Force
