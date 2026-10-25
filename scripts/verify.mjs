@@ -656,9 +656,10 @@ console.log("\n[9] 客户端 bundle（slot 注册与语言包）");
   const exportsObj = captured.factory(fakeRequire);
   ok(typeof exportsObj.apply === "function", "客户端导出 apply()");
   ok(Array.isArray(exportsObj.inject), "客户端声明了 inject 列表");
-  for (const need of ["slots", "locale", "sessions", "workspaces"]) {
+  for (const need of ["slots", "locale", "sessions"]) {
     ok(exportsObj.inject.includes(need), `inject 声明了 ${need}`);
   }
+  ok(!exportsObj.inject.includes("workspaces"), "inject 不再声明 workspaces（0.2.1-rc.3 的 workspaces 服务没有 refresh，插件也不再使用它）");
 
   const registrations = [];
   const dictionaries = [];

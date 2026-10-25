@@ -40,8 +40,8 @@ Grab the latest archive from the [Releases page](https://github.com/jackxiao17/d
 
 ## Compatibility
 
-- **Verified live on DeepSeek Harness `0.2.1-rc.2`** (desktop build, the `dsh web` web profile): delete, restore (including the original sidebar position), permanent delete, the subagent cascade, bin search and the chat-log viewer all pass end to end, and a whole-`~/.dsh` residue scan comes back clean afterwards
-- Every host contract it relies on was checked against the `0.2.1-rc.2` source: session log format v4 and its zstd frame layout, the `session_projcache` storage domain v7, the `workspaceRegistry` / `schedule` / `storageDomain` / `webServer` services, and the client slots plus `__ModuleLoader__`
+- **Verified live on DeepSeek Harness `0.2.1-rc.3`** (desktop build, the `dsh web` web profile): delete, restore, the recycle bin and the chat-log viewer all work; the full regression (subagent cascade plus a whole-`~/.dsh` residue scan) was run on `0.2.1-rc.2`
+- Every host contract it relies on was checked against the `0.2.1-rc.3` source: session log format v4 and its zstd frame layout, the `session_projcache` storage domain v7, the `workspaceRegistry` / `schedule` / `storageDomain` / `webServer` services, and the client slots plus `__ModuleLoader__` — nothing incompatible
 - **Backward compatibility is not verified, so it is not promised.** What can be said is how it fails: every host API call is guarded by an existence check and falls back to the equivalent file-level path, so on an older build the worst case is **less functionality** (for example the slot cannot be restored, so the session returns to the top of the sidebar — reported honestly), never deleting the wrong thing or leaving invisible garbage
 - `0.1.x` is untested: that line went through v0→v4 format migrations and large API changes, so it is not recommended
 - If a major DSH upgrade breaks the plugin, the symptom is a missing menu item/button or an error on an action — session data is never harmed. Binned data stays under `~/.dsh/dsh-session-cleaner/trash/` and can be moved back by hand to `sessions/<proj>/<id>/`
@@ -135,6 +135,11 @@ node scripts\verify.mjs
 Release only when it ends with `N 通过 / 0 失败` (N passed / 0 failed).
 
 ## Changelog
+
+### 0.7.3 (0.2.1-rc.3 adaptation + dead-call cleanup)
+
+- Compatibility audited against DeepSeek Harness **0.2.1-rc.3** source (host services, session log format v4, the projection-cache domain, client slots and `__ModuleLoader__`): nothing incompatible, and the plugin was exercised live on that build
+- **Removed two client calls that no longer exist on rc.3**: the rc.3 session-list snapshot has no `current` field, the `sessions` service has no `clear()`, and the `workspaces` service has no `refresh()` — all three were best-effort calls for clearing the main view after a delete and refreshing the sidebar, silently skipped on rc.3. Clearing the main view of a deleted session is left entirely to the host's `session/disposed → api-session/removed` push; the post-restore sidebar refresh still uses `sessions.refresh()` (present on rc.3). The client-side `inject` drops `workspaces` accordingly
 
 ### 0.7.2 (plugin-page icon & localization + two fixes)
 
