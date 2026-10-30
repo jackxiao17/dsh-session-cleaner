@@ -40,8 +40,8 @@ Grab the latest archive from the [Releases page](https://github.com/jackxiao17/d
 
 ## Compatibility
 
-- **Verified live on DeepSeek Harness `0.2.1-rc.3`** (desktop build, the `dsh web` web profile): delete, restore, the recycle bin and the chat-log viewer all work; the full regression (subagent cascade plus a whole-`~/.dsh` residue scan) was run on `0.2.1-rc.2`
-- Every host contract it relies on was checked against the `0.2.1-rc.3` source: session log format v4 and its zstd frame layout, the `session_projcache` storage domain v7, the `workspaceRegistry` / `schedule` / `storageDomain` / `webServer` services, and the client slots plus `__ModuleLoader__` — nothing incompatible
+- **Re-verified on DeepSeek Harness `0.2.1-rc.5`** (desktop build, the `dsh web` web profile): full source audit plus live probes (`/session-cleaner/api/health` and `/trash/list` both return 200); the earlier live pass (delete, restore, the recycle bin and the chat-log viewer) ran on `0.2.1-rc.3`, and the full regression (subagent cascade plus a whole-`~/.dsh` residue scan) on `0.2.1-rc.2`
+- Every host contract it relies on was checked against the `0.2.1-rc.5` source: session log format v4 and its zstd frame layout, the `session_projcache` storage domain v7, the `workspaceRegistry` / `schedule` / `storageDomain` / `webServer` services, and the client slots plus `__ModuleLoader__` — nothing incompatible
 - **Backward compatibility is not verified, so it is not promised.** What can be said is how it fails: every host API call is guarded by an existence check and falls back to the equivalent file-level path, so on an older build the worst case is **less functionality** (for example the slot cannot be restored, so the session returns to the top of the sidebar — reported honestly), never deleting the wrong thing or leaving invisible garbage
 - `0.1.x` is untested: that line went through v0→v4 format migrations and large API changes, so it is not recommended
 - If a major DSH upgrade breaks the plugin, the symptom is a missing menu item/button or an error on an action — session data is never harmed. Binned data stays under `~/.dsh/dsh-session-cleaner/trash/` and can be moved back by hand to `sessions/<proj>/<id>/`
@@ -135,6 +135,12 @@ node scripts\verify.mjs
 Release only when it ends with `N 通过 / 0 失败` (N passed / 0 failed).
 
 ## Changelog
+
+### 0.7.4 (sidebar button aligned with New Session + rc.5 re-check)
+
+- **The sidebar "Session Recycle Bin" button now follows the product's New Session button**: the hard-coded light/dark colors are gone in favor of product tokens (`--dsw-alias-button-elevated-fill`, `--dsw-alias-border-l3`, `--dsw-alias-label-primary`, `--dsw-alias-interactive-bg-hover`), and its metrics match (`.5px` hairline, `radius-md` 12px, 38px height, `floating-hover` on hover) — default and hover states track the native button under any theme (including the dsh-ocean-theme shallow/deep variants)
+- Compatibility re-checked against DeepSeek Harness **0.2.1-rc.5** (full source audit plus live probes: `/session-cleaner/api/health` and `/trash/list` both return 200): nothing incompatible
+- Cleanup: dropped the `@deepseek-ai/dsh-client-ui-slots` entry from `dsh.client.inject` (that package no longer exists on rc.5), removed the now-dead `scl-themeLight` / `scl-themeDark` class names, and aligned `buildId` with 0.7.4
 
 ### 0.7.3 (0.2.1-rc.3 adaptation + dead-call cleanup)
 
