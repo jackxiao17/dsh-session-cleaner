@@ -136,6 +136,12 @@ Release only when it ends with `N 通过 / 0 失败` (N passed / 0 failed).
 
 ## Changelog
 
+### 0.7.5 (macOS layering restored for the sidebar button)
+
+- **Fixed the sidebar "Session Recycle Bin" button looking more opaque than the native New Session button on macOS**: 0.7.4 moved the button onto product tokens, which already matched the light/dark fill, but the host additionally layers a translucent overlay on New Session under macOS (light `#ffffff8c`, hover `#ffffff4d`; dark `#ffffff26`, hover `#ffffff33`, all scoped to `[data-platform=darwin]`). That layer does not live in the tokens, so without it the button rendered as opaque white and looked noticeably brighter than the native one against the sidebar gradient. 0.7.5 restores those four rules in the host's own order
+- The collapsed (rail) state now overrides border color only (`border-color:transparent`, keeping the base `.5px` width), matching the host's `.kB3qhq_collapsed` rule — so even the quirk where macOS dark + collapsed keeps a 15% white fill now matches the native button exactly
+- **Zero impact on Windows / Linux**: every added rule is scoped to `[data-platform=darwin]`, the same check the host itself uses (`document.documentElement.dataset.platform === "darwin"`), so nothing matches off macOS; verified identical to 0.7.4 in both light and dark Windows themes
+
 ### 0.7.4 (sidebar button aligned with New Session + rc.5 re-check)
 
 - **The sidebar "Session Recycle Bin" button now follows the product's New Session button**: the hard-coded light/dark colors are gone in favor of product tokens (`--dsw-alias-button-elevated-fill`, `--dsw-alias-border-l3`, `--dsw-alias-label-primary`, `--dsw-alias-interactive-bg-hover`), and its metrics match (`.5px` hairline, `radius-md` 12px, 38px height, `floating-hover` on hover) — default and hover states track the native button under any theme (including the dsh-ocean-theme shallow/deep variants)

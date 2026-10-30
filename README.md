@@ -134,6 +134,12 @@ node scripts\verify.mjs
 
 ## 更新记录
 
+### 0.7.5（补齐 macOS 按钮的层叠覆盖）
+
+- **修掉 macOS 上「会话回收站」按钮比原生「新会话」实一档的问题**：0.7.4 让按钮消费产品 token 之后，浅色/深色底色本身已经对齐，但宿主在 macOS 上还给「新会话」叠了一层半透明覆盖（浅色 `#ffffff8c`、悬浮 `#ffffff4d`；深色 `#ffffff26`、悬浮 `#ffffff33`，规则写在 `[data-platform=darwin]` 下）。这层不在 token 里，缺了它 Mac 上的按钮就是"不透明白"，压在侧栏渐变上会明显更亮更实。0.7.5 按宿主的顺序原样补回这 4 条规则
+- 侧栏收起态的边框改为只覆盖颜色（`border-color:transparent`，宽度沿用基础的 `.5px`），与宿主 `.kB3qhq_collapsed` 的写法一致，连"macOS 深色 + 收起时仍带 15% 白底"这种层叠细节也与原生相同
+- **Windows / Linux 零影响**：新增规则全部挂在 `[data-platform=darwin]` 下，宿主自己的平台判断就是 `document.documentElement.dataset.platform === "darwin"`，非 macOS 上不会命中；Windows 浅色/深色两种主题下已实测与 0.7.4 表现一致
+
 ### 0.7.4（侧栏按钮与「新会话」对齐 + rc.5 复核）
 
 - **侧栏底部「会话回收站」按钮跟随产品「新会话」按钮配色**：先去掉按浅/深色硬编码的颜色，改为消费产品 token（`--dsw-alias-button-elevated-fill`、`--dsw-alias-border-l3`、`--dsw-alias-label-primary`、`--dsw-alias-interactive-bg-hover`），再逐项对齐尺寸（`.5px` 发丝线、`radius-md` 12px、38px 高、`floating-hover` 悬停）——任何主题（含 dsh-ocean-theme 浅海/深海）下默认态与悬停态都与原生按钮一致
