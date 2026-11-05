@@ -24,6 +24,10 @@ const ANCHOR = "session-99999999-8888-7777-6666-555555555555";
 const PROJ = "F--work-demo--";
 const OTHER = "F--other--";
 
+// DSH 0.2.2-rc.1 起定时任务的归属写在 target.sessionId，顶层不再带 sessionId；
+// 更早写入的行仍可能只有顶层 sessionId，插件两种情况都要认。
+const ownedBy = (entry, sessionId) => entry?.target?.sessionId === sessionId || entry?.sessionId === sessionId;
+
 async function makeHome() {
   const home = await mkdtemp(join(tmpdir(), "dsh-verify-"));
   await mkdir(join(home, "sessions", PROJ, SID), { recursive: true });
@@ -46,7 +50,7 @@ async function makeHome() {
 
 function makeHost(home, opts = {}) {
   const log = { warnings: [], infos: [] };
-  const call = { insertSessionBefore: [], stopSessionTasks: 0, scheduleDelete: [] };
+  const call = { insertSessionBefore: [], stopSessionTasks: 0, scheduleDelete: [], scheduleEdit: [] };
 
   // 工作区：一个工作区，槽位顺序 [A, S, B]
   const slots = [ANCHOR + "-prev", SID, ANCHOR];
@@ -94,21 +98,53 @@ function makeHost(home, opts = {}) {
   const storageDomain = opts.noStorageDomain ? undefined : { get: (name) => (name === "session_projcache" ? { table: () => domainTable } : undefined) };
 
   const schedules = [
-    { id: "schedule-aaaa", sessionId: SID, status: "active", kind: "at", title: "提醒", prompt: "p", scheduledAt: "2099-01-01T00:00:00.000Z" },
-    { id: "schedule-bbbb", sessionId: SID, status: "inactive", kind: "at", title: "旧提醒", prompt: "p", scheduledAt: "2020-01-01T00:00:00.000Z" },
-    { id: "schedule-cccc", sessionId: "other-session", status: "active", kind: "at", title: "别人的", prompt: "p", scheduledAt: "2099-01-01T00:00:00.000Z" }
+    // 0.2.2-rc.1 形状：归属在 target.sessionId，顶层没有 sessionId
+    { id: "schedule-aaaa", target: { kind: "session", sessionId: SID }, involvedSessionIds: [SID], status: "active", kind: "at", title: "提醒", prompt: "p", scheduledAt: "2099-01-01T00:00:00.000Z" },
+    { id: "schedule-bbbb", target: { kind: "session", sessionId: SID }, involvedSessionIds: [SID], status: "inactive", kind: "at", title: "旧提醒", prompt: "p", scheduledAt: "2020-01-01T00:00:00.000Z" },
+    // 老格式行：只有顶层 sessionId，宿主仍会读入，插件必须照样认
+    { id: "schedule-legacy", sessionId: SID, status: "inactive", kind: "at", title: "上古提醒", prompt: "p", scheduledAt: "2019-01-01T00:00:00.000Z" },
+    { id: "schedule-cccc", target: { kind: "session", sessionId: "other-session" }, involvedSessionIds: ["other-session"], status: "active", kind: "at", title: "别人的", prompt: "p", scheduledAt: "2099-01-01T00:00:00.000Z" }
   ];
+  const removeRow = (id) => {
+    const i = schedules.findIndex(s => s.id === id);
+    if (i === -1) return false;
+    schedules.splice(i, 1);
+    return true;
+  };
   const schedule = {
     async catalog() { return schedules.map(s => ({ ...s })); },
-    async list({ sessionId }) { return schedules.filter(s => s.sessionId === sessionId && s.status === "active").map(({ sessionId: _s, status: _t, ...record }) => record); },
-    async stopSessionTasks(sessionId) { call.stopSessionTasks++; for (let i = schedules.length - 1; i >= 0; i--) if (schedules[i].sessionId === sessionId && schedules[i].status === "active") schedules.splice(i, 1); },
-    async delete({ sessionId, id }) {
-      call.scheduleDelete.push([sessionId, id]);
-      const i = schedules.findIndex(s => s.id === id && s.sessionId === sessionId);
-      if (i === -1) return { id, deleted: false, code: "schedule_not_found" };
-      schedules.splice(i, 1);
-      return { id, deleted: true };
-    }
+    // 0.2.2-rc.1 的 list() 只做分页，sessionId 过滤已移除
+    async list({ active, limit = 50, offset = 0 } = {}) {
+      const filtered = schedules.filter(s => active === undefined || (s.status === "active") === active);
+      const items = filtered.slice(offset, offset + limit).map(s => ({ ...s }));
+      return { items, shown: items.length, total: filtered.length, limit, offset };
+    },
+    async stopSessionTasks(sessionId) {
+      call.stopSessionTasks++;
+      for (let i = schedules.length - 1; i >= 0; i--) {
+        if (ownedBy(schedules[i], sessionId) && schedules[i].status === "active") schedules.splice(i, 1);
+      }
+    },
+    ...(opts.legacyScheduleApi
+      ? {
+        // 旧宿主（≤0.2.1）的删单条接口
+        async delete({ sessionId, id }) {
+          call.scheduleDelete.push([sessionId, id]);
+          const row = schedules.find(s => s.id === id);
+          if (row === undefined || !ownedBy(row, sessionId)) return { id, deleted: false, code: "schedule_not_found" };
+          removeRow(id);
+          return { id, deleted: true };
+        }
+      }
+      : {
+        // 0.2.2-rc.1：删单条只剩 edit({id, action:"delete"})
+        async edit(request, actorSessionId) {
+          if (request.action !== "delete") throw new Error("verify: 只实现了 delete");
+          call.scheduleEdit.push([actorSessionId, request.id]);
+          if (!removeRow(request.id)) return { id: request.id, code: "schedule_not_found" };
+          return { id: request.id, deleted: true };
+        }
+      })
   };
 
   const routes = [];
@@ -205,8 +241,8 @@ console.log("\n[2] 移入回收站 / 恢复");
   const listed = await call(host, "POST", "/trash/list");
   const listedItem = listed.body.result.items.find(i => i.id === SID);
   ok(listedItem !== undefined && listedItem.projcacheRow === undefined, "列表响应不携带投影缓存行原文（只回展示字段）");
-  eq(meta.schedules.length, 2, "快照里抄录了该会话的 2 条定时任务");
-  eq(trashed.body.result.schedulesKept, 2, "响应回报定时任务仍在");
+  eq(meta.schedules.length, 3, "快照里抄录了该会话的 3 条定时任务（新格式 + 老格式）");
+  eq(trashed.body.result.schedulesKept, 3, "响应回报定时任务仍在");
   eq(trashed.body.result.cacheRemoved, true, "投影缓存行已删");
   eq(trashed.body.result.cacheBackupsRemoved, 1, "投影缓存备份文件已删");
   ok(!existsSync(join(home, "storages", "session_projcache", "sessions", `${SID}.json`)), "缓存行文件不在了");
@@ -214,7 +250,7 @@ console.log("\n[2] 移入回收站 / 恢复");
   ok(host.projRows.get(SID) === "deleted-by-domain", "走的是宿主存储域的表删除");
   eq(host.slots.join(","), [ANCHOR + "-prev", ANCHOR].join(","), "记账槽位已摘掉");
   eq(host.global.pinnedSessionIds.length, 0, "置顶已清");
-  eq(host.schedules.filter(s => s.sessionId === SID).length, 2, "回收站阶段不动定时任务");
+  eq(host.schedules.filter(s => ownedBy(s, SID)).length, 3, "回收站阶段不动定时任务");
 
   const restored = await call(host, "POST", "/trash/restore", { sessionId: SID });
   eq(restored.status, 200, "POST /trash/restore 返回 200");
@@ -255,11 +291,29 @@ console.log("\n[3] 彻底删除（含定时任务与空工程目录）");
   ok(!existsSync(join(home, "dsh-session-cleaner", "trash", "items", SID)), "回收站目录已删");
   ok(!existsSync(join(home, "dsh-session-cleaner", "trash", "meta", `${SID}.json`)), "快照已删");
   ok(host.call.stopSessionTasks >= 1, "调用了宿主的 stopSessionTasks");
-  ok(host.schedules.every(s => s.sessionId !== SID), "该会话的定时任务（含已结束的历史行）都没了");
-  ok(host.schedules.some(s => s.sessionId === "other-session"), "别的会话的定时任务没被误删");
+  ok(host.call.scheduleEdit.length >= 1, "0.2.2-rc.1 的历史行用 edit({id,action:'delete'}) 删掉");
+  eq(host.call.scheduleDelete.length, 0, "不再依赖 0.2.2-rc.1 已移除的 schedule.delete");
+  ok(host.schedules.every(s => !ownedBy(s, SID)), "该会话的定时任务（含已结束的历史行）都没了");
+  ok(host.schedules.some(s => ownedBy(s, "other-session")), "别的会话的定时任务没被误删");
   ok(!existsSync(join(home, "sessions", OTHER)), "只装着它的工程目录被删掉了");
   ok(existsSync(join(home, "sessions", PROJ)), "还有别的会话的工程目录不受影响");
   ok(Array.isArray(purged.body.result.results[0].notes), "回报了清理明细");
+  await rm(home, { recursive: true, force: true });
+}
+
+// ───────────────────────── 3b. 旧宿主的 schedule.delete 回落 ─────────────────────────
+
+console.log("\n[3b] 旧宿主（没有 edit()）回落 schedule.delete");
+{
+  const { home } = await makeHome();
+  const host = makeHost(home, { legacyScheduleApi: true });
+  mod.apply(host.ctx);
+  await call(host, "POST", "/trash", { sessionId: SID });
+  const purged = await call(host, "POST", "/trash/delete", { sessionIds: [SID] });
+  eq(purged.status, 200, "POST /trash/delete 返回 200");
+  ok(host.call.scheduleDelete.length >= 1, "走了旧的 schedule.delete");
+  ok(host.schedules.every(s => !ownedBy(s, SID)), "旧宿主上该会话的定时任务也清干净了");
+  ok(host.schedules.some(s => ownedBy(s, "other-session")), "别人的任务仍然保留");
   await rm(home, { recursive: true, force: true });
 }
 
@@ -292,7 +346,7 @@ console.log("\n[4] 同 id 操作串行化");
   eq(stale.body.result.results[0].skipped, true, "如实回报 skipped");
   ok(existsSync(join(h4.home, "sessions", PROJ, SID)), "刚恢复的会话目录没被误删");
   ok(existsSync(join(h4.home, "storages", "session_projcache", "sessions", `${SID}.json`)), "刚恢复的缓存行没被误清");
-  ok(host4.schedules.some(s => s.sessionId === SID), "刚恢复的会话的定时任务没被误清");
+  ok(host4.schedules.some(s => ownedBy(s, SID)), "刚恢复的会话的定时任务没被误清");
   await rm(h4.home, { recursive: true, force: true });
 }
 
@@ -359,14 +413,14 @@ console.log("\n[4b] 子会话（subagent）随父会话一起走");
   mod.apply(host5.ctx);
   await call(host5, "POST", "/trash", { sessionId: SID });
   // 给父子都挂上定时任务，验证彻底删除时一起清
-  host5.schedules.push({ id: "schedule-p", sessionId: SID, status: "active", kind: "at", title: "t", prompt: "p", scheduledAt: "2099-01-01T00:00:00.000Z" });
-  host5.schedules.push({ id: "schedule-c", sessionId: CHILD1, status: "active", kind: "at", title: "t", prompt: "p", scheduledAt: "2099-01-01T00:00:00.000Z" });
+  host5.schedules.push({ id: "schedule-p", target: { kind: "session", sessionId: SID }, involvedSessionIds: [SID], status: "active", kind: "at", title: "t", prompt: "p", scheduledAt: "2099-01-01T00:00:00.000Z" });
+  host5.schedules.push({ id: "schedule-c", target: { kind: "session", sessionId: CHILD1 }, involvedSessionIds: [CHILD1], status: "active", kind: "at", title: "t", prompt: "p", scheduledAt: "2099-01-01T00:00:00.000Z" });
   const purged = await call(host5, "POST", "/trash/delete", { sessionIds: [SID] });
   eq(purged.body.result.results[0].deleted, true, "彻底删除父会话");
   eq(purged.body.result.results[0].descendantsPurged, 2, "回报清掉了 2 个后代");
   for (const id of [SID, CHILD1, GRAND]) {
     ok(!existsSync(join(h5.home, "storages", "session_projcache", "sessions", `${id}.json`)), `${id} 缓存行彻底清掉`);
-    ok(!host5.schedules.some(s => s.sessionId === id), `${id} 的定时任务已清`);
+    ok(!host5.schedules.some(s => ownedBy(s, id)), `${id} 的定时任务已清`);
   }
   ok(!existsSync(join(h5.home, "dsh-session-cleaner", "trash", "items", SID)), "回收站目录（含 .children）已删");
   await rm(h5.home, { recursive: true, force: true });
@@ -749,3 +803,4 @@ console.log("\n[10] screenshots.json 与 README 图片");
 
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`);
 process.exit(fail === 0 ? 0 : 1);
+

@@ -40,8 +40,8 @@ Grab the latest archive from the [Releases page](https://github.com/jackxiao17/d
 
 ## Compatibility
 
-- **Re-verified on DeepSeek Harness `0.2.1-rc.5`** (desktop build, the `dsh web` web profile): full source audit plus live probes (`/session-cleaner/api/health` and `/trash/list` both return 200); the earlier live pass (delete, restore, the recycle bin and the chat-log viewer) ran on `0.2.1-rc.3`, and the full regression (subagent cascade plus a whole-`~/.dsh` residue scan) on `0.2.1-rc.2`
-- Every host contract it relies on was checked against the `0.2.1-rc.5` source: session log format v4 and its zstd frame layout, the `session_projcache` storage domain v7, the `workspaceRegistry` / `schedule` / `storageDomain` / `webServer` services, and the client slots plus `__ModuleLoader__` — nothing incompatible
+- **Re-verified on DeepSeek Harness `0.2.2-rc.1`** (desktop build, the `dsh web` web profile): full source audit plus live probes (`/session-cleaner/api/health` and `/trash/list` both return 200); the earlier live pass (delete, restore, the recycle bin and the chat-log viewer) ran on `0.2.1-rc.3`, and the full regression (subagent cascade plus a whole-`~/.dsh` residue scan) on `0.2.1-rc.2`
+- Every host contract it relies on was checked against the `0.2.2-rc.1` source: session log format v4 and its zstd frame layout, the `session_projcache` storage domain v7, the `workspaceRegistry` / `schedule` / `storageDomain` / `webServer` services, and the client slots plus `__ModuleLoader__` — nothing incompatible
 - **Backward compatibility is not verified, so it is not promised.** What can be said is how it fails: every host API call is guarded by an existence check and falls back to the equivalent file-level path, so on an older build the worst case is **less functionality** (for example the slot cannot be restored, so the session returns to the top of the sidebar — reported honestly), never deleting the wrong thing or leaving invisible garbage
 - `0.1.x` is untested: that line went through v0→v4 format migrations and large API changes, so it is not recommended
 - If a major DSH upgrade breaks the plugin, the symptom is a missing menu item/button or an error on an action — session data is never harmed. Binned data stays under `~/.dsh/dsh-session-cleaner/trash/` and can be moved back by hand to `sessions/<proj>/<id>/`
@@ -136,6 +136,13 @@ Release only when it ends with `N 通过 / 0 失败` (N passed / 0 failed).
 
 ## Changelog
 
+### 0.7.6 (DSH 0.2.2-rc.1 adaptation + schedule ownership fix)
+
+- **Compatibility re-checked against DeepSeek Harness `0.2.2-rc.1`** (full source audit plus live probes: `/session-cleaner/api/health` and `/trash/list` both return 200): the `workspaceRegistry` / `sessions` / `agents` / `storageDomain` / `webServer` services, the projection-cache domain, session log format v4, and the client slots plus `__ModuleLoader__` — nothing incompatible
+- **Fixed the `0.2.2-rc.1` regression where "delete forever" no longer cleared scheduled tasks**: the host moved a task's session binding from the top-level `sessionId` to `target.sessionId` (the old field is kept only for legacy rows), so the previous filter matched nothing and the bin showed no schedules for the session; both shapes are now recognized
+- **Followed the host's single-row delete change**: `0.2.2-rc.1` removed `schedule.delete({sessionId,id})` in favor of `edit({id, action:"delete"})`, and `list()` no longer filters by `sessionId` (pagination only). The plugin prefers `edit`, filters the page itself, and still falls back to `schedule.delete` on older hosts
+- The verification harness now models the `0.2.2-rc.1` task shape (`target.sessionId` plus one legacy row) and adds a legacy-host fallback case: **214 passed / 0 failed**
+
 ### 0.7.5 (macOS layering restored for the sidebar button)
 
 - **Fixed the sidebar "Session Recycle Bin" button looking more opaque than the native New Session button on macOS**: 0.7.4 moved the button onto product tokens, which already matched the light/dark fill, but the host additionally layers a translucent overlay on New Session under macOS (light `#ffffff8c`, hover `#ffffff4d`; dark `#ffffff26`, hover `#ffffff33`, all scoped to `[data-platform=darwin]`). That layer does not live in the tokens, so without it the button rendered as opaque white and looked noticeably brighter than the native one against the sidebar gradient. 0.7.5 restores those four rules in the host's own order
@@ -186,3 +193,4 @@ Release only when it ends with `N 通过 / 0 失败` (N passed / 0 failed).
 ## License
 
 [MIT](LICENSE)
+

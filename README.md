@@ -40,8 +40,8 @@
 
 ## 兼容性
 
-- **已在 DeepSeek Harness `0.2.1-rc.5`（桌面版，`dsh web` 的 web profile）上复核通过**：`0.2.1-rc.5` 全量源码核对 + 真机接口实测（`/session-cleaner/api/health`、`/trash/list` 均 200）；`0.2.1-rc.3` 上做过删除、恢复、回收站浏览与对话记录回看的真机验证，`0.2.1-rc.2` 上做过含子会话级联与全盘残留扫描的完整回归
-- 依赖的宿主契约（会话日志格式 v4 与 zstd 帧布局、`session_projcache` 存储域 v7、`workspaceRegistry` / `schedule` / `storageDomain` / `webServer` 服务、前端 slot 与 `__ModuleLoader__`）均逐一与 `0.2.1-rc.5` 源码核对，无不适配项
+- **已在 DeepSeek Harness `0.2.2-rc.1`（桌面版，`dsh web` 的 web profile）上复核通过**：`0.2.2-rc.1` 全量源码核对 + 真机接口实测（`/session-cleaner/api/health`、`/trash/list` 均 200）；`0.2.1-rc.3` 上做过删除、恢复、回收站浏览与对话记录回看的真机验证，`0.2.1-rc.2` 上做过含子会话级联与全盘残留扫描的完整回归
+- 依赖的宿主契约（会话日志格式 v4 与 zstd 帧布局、`session_projcache` 存储域 v7、`workspaceRegistry` / `schedule` / `storageDomain` / `webServer` 服务、前端 slot 与 `__ModuleLoader__`）均逐一与 `0.2.2-rc.1` 源码核对，无不适配项
 - **向下兼容没有逐一验证，因此不做承诺**。可以说明的是它的失效方式：所有宿主 API 调用都带存在性检查，取不到就回落到"直接操作文件"的等价路径，所以老版本上最坏表现是**功能少一点**（例如槽位无法还原 → 会话恢复到侧栏顶部，并在回报里如实说明），不会删错东西，也不会留下看不见的垃圾
 - `0.1.x` 未验证：那一系的会话格式经历过 v0→v4 迁移、宿主 API 变动也大，不建议直接用
 - 升级 DSH 大版本后若插件失灵，表现是菜单项/按钮消失或操作报错，不会伤及会话数据；回收站里的数据仍在 `~/.dsh/dsh-session-cleaner/trash/`，可手工搬回 `sessions/<项目段>/<会话id>/`
@@ -80,7 +80,7 @@
 - **同 id 有两份日志目录时拒绝操作**：这是宿主自己都拒绝解析的损坏状态，插件会列出来让你先手工处理，而不是删掉一份、留下另一份却报成功
 - **崩溃安全**：快照先写、文件后搬，之后再把快照升级为完成态；启动时做一次双向对账——"没搬成"的残留快照会回滚（父会话带子会话时按**全有或全无**处理：只要还有一个成员留在原位，就把已搬走的逐个搬回），回收站里缺快照的孤儿目录会被收编成"数据不完整"条目（可见、可彻底删除，但不能恢复，因为原路径已无从得知）
 - **0.7.0 移除了两个没人调用的 HTTP 端点**：`POST /delete`（不进回收站的物理删除）与 `POST /status`。现在删除只有一条链：移入回收站 → 彻底删除
-- 只在本机桌面版（`dsh web` 的 web profile）的 **DeepSeek Harness 0.2.1-rc.5** 上验证过；别的部署形态、更早的 0.2.x 与 0.1.x 都没测过（见上面「兼容性」）
+- 只在本机桌面版（`dsh web` 的 web profile）的 **DeepSeek Harness 0.2.2-rc.1** 上验证过；别的部署形态、更早的 0.2.x 与 0.1.x 都没测过（见上面「兼容性」）
 
 ## 卸载 / 回滚
 
@@ -134,6 +134,13 @@ node scripts\verify.mjs
 
 ## 更新记录
 
+### 0.7.6（适配 DSH 0.2.2-rc.1 + 定时任务归属修复）
+
+- **兼容性复核：DeepSeek Harness `0.2.2-rc.1` 源码全量核对 + 真机接口实测**（`/session-cleaner/api/health`、`/trash/list` 均 200）：`workspaceRegistry` / `sessions` / `agents` / `storageDomain` / `webServer` 服务、投影缓存域、会话日志格式 v4、前端 slot 与 `__ModuleLoader__` 逐项对照，无不适配项
+- **修掉 `0.2.2-rc.1` 上「彻底删除不清定时任务」的回归**：宿主把任务的会话归属从顶层 `sessionId` 移到了 `target.sessionId`（顶层字段只留给老数据），原来的过滤条件一条也匹配不到，回收站里该会话的定时任务会显示为空；现在两种写法都认
+- **跟随宿主删单条接口的变化**：`0.2.2-rc.1` 移除了 `schedule.delete({sessionId,id})`，只剩 `edit({id, action:"delete"})`；`list()` 也不再支持 `sessionId` 过滤（只做分页）。插件改为优先走 `edit`、分页后在前端过滤，旧宿主上仍回落 `schedule.delete`
+- 验证台同步升级为 `0.2.2-rc.1` 的任务形状（`target.sessionId` + 一条老格式行），并新增旧宿主回落用例：**214 项通过 / 0 失败**
+
 ### 0.7.5（补齐 macOS 按钮的层叠覆盖）
 
 - **修掉 macOS 上「会话回收站」按钮比原生「新会话」实一档的问题**：0.7.4 让按钮消费产品 token 之后，浅色/深色底色本身已经对齐，但宿主在 macOS 上还给「新会话」叠了一层半透明覆盖（浅色 `#ffffff8c`、悬浮 `#ffffff4d`；深色 `#ffffff26`、悬浮 `#ffffff33`，规则写在 `[data-platform=darwin]` 下）。这层不在 token 里，缺了它 Mac 上的按钮就是"不透明白"，压在侧栏渐变上会明显更亮更实。0.7.5 按宿主的顺序原样补回这 4 条规则
@@ -184,3 +191,4 @@ node scripts\verify.mjs
 ## License
 
 [MIT](LICENSE)
+
