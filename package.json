@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-cleaner",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "description": "DSH 会话清理插件：侧栏会话「···」菜单一键把会话搬进回收站（目录整体 rename 迁走，原子操作），回收站支持标题/正文搜索、恢复与彻底删除。删除时同步摘掉工作区记账、置顶与归档标记，清掉投影缓存行（含备份文件），带子代理的会话整棵后代树一起处理；恢复时逐项还原，包括侧栏原位置。彻底删除时再清掉绑定该会话的定时任务与空掉的工程目录。已适配并真机验证 DeepSeek Harness 0.2.2-rc.1（宿主契约全量源码核对；rc.5/rc.3 上做过真机验证，rc.2 上做过全盘残留扫描），删除后全盘无残留。",
   "license": "MIT",
   "keywords": [
@@ -28,13 +28,14 @@
     "./client": "./lib/client.js",
     "./icon": "./icon.svg",
     "./locale/*.json": "./locale/*.json",
+    "./locale/*.md": "./locale/*.md",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
     "cordis.patch.yml",
     "icon.svg",
-    "locale/*.json",
+    "locale",
     "README.md",
     "README.en.md"
   ],

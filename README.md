@@ -134,6 +134,12 @@ node scripts\verify.mjs
 
 ## 更新记录
 
+### 0.7.7（插件页只显示简介，不再铺整篇 README）
+
+- **修掉插件页把整篇 README 当详情文档展示的问题**：宿主的文档顺序是「`locale/<语言>.json` 里的 `meta.detail` → 包内 README → 仓库 README（仅市场条目）」。此前没有 `meta.detail`，页面就回落到包内 README，一屏全是安装步骤和更新记录
+- 新增 `locale/detail.zh.md` / `locale/detail.en.md`，并在两个 locale 文件的 `meta.detail` 里指向它们；插件页现在只显示一段简介 + 指向 GitHub 的完整说明入口，README 仍原样留在仓库与压缩包里
+- 打包清单带上 `locale/*.md`：`files` 改为整个 `locale` 目录，`exports` 增加 `./locale/*.md`
+
 ### 0.7.6（适配 DSH 0.2.2-rc.1 + 定时任务归属修复）
 
 - **兼容性复核：DeepSeek Harness `0.2.2-rc.1` 源码全量核对 + 真机接口实测**（`/session-cleaner/api/health`、`/trash/list` 均 200）：`workspaceRegistry` / `sessions` / `agents` / `storageDomain` / `webServer` 服务、投影缓存域、会话日志格式 v4、前端 slot 与 `__ModuleLoader__` 逐项对照，无不适配项

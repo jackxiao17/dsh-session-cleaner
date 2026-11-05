@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "Session Cleaner",
-    "description": "One-click move sessions to a recoverable recycle bin from the sidebar ··· menu — with search, restore, and permanent delete; also cleans pins, archive flags, caches, sub-agent trees, and scheduled tasks."
+    "description": "One-click move sessions to a recoverable recycle bin from the sidebar ··· menu — with search, restore, and permanent delete; also cleans pins, archive flags, caches, sub-agent trees, and scheduled tasks.",
+    "detail": "locale/detail.en.md"
   }
 }

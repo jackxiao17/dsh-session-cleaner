@@ -136,6 +136,12 @@ Release only when it ends with `N 通过 / 0 失败` (N passed / 0 failed).
 
 ## Changelog
 
+### 0.7.7 (plugin page shows a short intro again, not the whole README)
+
+- **Fixed the plugin page rendering the full README as its detail document**: the host resolves a bundle's detail in the order "`meta.detail` in `locale/<language>.json` → the package README → the repo README (market entries only)". With no `meta.detail`, the page fell back to the package README and showed the install section and changelog.
+- Added `locale/detail.zh.md` / `locale/detail.en.md` and pointed `meta.detail` at them in both locale files; the page now shows a short intro plus a link to the full GitHub documentation, while the README stays in the repo and the release zip.
+- Packaging now carries `locale/*.md`: `files` switched to the whole `locale` directory and `exports` gained `./locale/*.md`.
+
 ### 0.7.6 (DSH 0.2.2-rc.1 adaptation + schedule ownership fix)
 
 - **Compatibility re-checked against DeepSeek Harness `0.2.2-rc.1`** (full source audit plus live probes: `/session-cleaner/api/health` and `/trash/list` both return 200): the `workspaceRegistry` / `sessions` / `agents` / `storageDomain` / `webServer` services, the projection-cache domain, session log format v4, and the client slots plus `__ModuleLoader__` — nothing incompatible
