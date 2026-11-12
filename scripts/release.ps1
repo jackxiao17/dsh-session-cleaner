@@ -1,10 +1,12 @@
 <#
 .SYNOPSIS
-    dsh-session-cleaner 发版脚本：校验版本号 → 打包 zip → 提交打标签 → 推送 → 建 Release 并上传 zip。
+    dsh-session-cleaner 发版脚本：校验版本号 → 打包 zip → 提交打标签 → 推送 → 更新仓库 About → 建 Release 并上传 zip。
 
 .DESCRIPTION
     维护者工具，不属于插件运行时（不出现在 package.json 的 files 列表里，不会被装进发行包）。
     版本号以 package.json 的 version 为唯一来源，脚本会校验 lib/index.js 的 buildId 是否一致。
+    About 文本以 package.json 的 about 字段为准（缺失时回退 description），
+    发版前记得随「已验证的 DSH 版本」一起改。
 
     鉴权与代理：
       - 优先用 GitHub CLI（已登录则直接使用）；
@@ -17,7 +19,7 @@
     pwsh -NoProfile -File scripts/release.ps1 -DryRun
 
 .EXAMPLE
-    # 正式发版：打包 + 提交 + 打标签 + 推送 + 建 Release + 传 zip
+    # 正式发版：打包 + 提交 + 打标签 + 推送 + 更新 About + 建 Release + 传 zip
     pwsh -NoProfile -File scripts/release.ps1
 
 .EXAMPLE
@@ -32,6 +34,8 @@ param(
     [switch]$SkipGit,
     # 跳过创建 Release（若 Release 不存在则只提示命令）
     [switch]$SkipRelease,
+    # 跳过更新 GitHub 仓库 About
+    [switch]$SkipAbout,
     # 跳过同步到 DSH 的两处安装目录
     [switch]$SkipSync,
     # 代理地址；传空字符串表示直连
@@ -59,7 +63,7 @@ $proxyArgs = @()
 if ($Proxy -ne '') { $proxyArgs = @('-x', $Proxy, '--ssl-no-revoke') }
 
 # ── 1. 读取并校验版本号 ────────────────────────────────────────────────
-Write-Step '1/7 校验版本号'
+Write-Step '1/8 校验版本号'
 $pkgPath = Join-Path $repoRoot 'package.json'
 $pkg = Get-Content -LiteralPath $pkgPath -Raw | ConvertFrom-Json
 $version = [string]$pkg.version
@@ -78,7 +82,7 @@ if ($buildVersion -ne $version) {
 Write-Ok "lib/index.js buildId = v$buildVersion（与 package.json 一致）"
 
 # ── 2. 打包 zip ───────────────────────────────────────────────────────
-Write-Step '2/7 打包发行 zip'
+Write-Step '2/8 打包发行 zip'
 $zipName = "dsh-session-cleaner-$version.zip"
 $zipPath = Join-Path $repoRoot $zipName
 $stage = Join-Path $env:TEMP "scl-release-stage-$version"
@@ -100,7 +104,7 @@ Write-Ok "$zipName  $([math]::Round((Get-Item $zipPath).Length / 1KB, 1)) KB"
 Write-Ok "SHA256 = $sha"
 
 # ── 3. 同步到 DSH 的两处安装目录 ───────────────────────────────────────
-Write-Step '3/7 同步到 DSH 安装目录'
+Write-Step '3/8 同步到 DSH 安装目录'
 if ($SkipSync) {
     Write-Skip '按参数要求跳过'
 } else {
@@ -123,7 +127,7 @@ if ($SkipSync) {
 }
 
 # ── 4. git 提交、打标签、推送 ──────────────────────────────────────────
-Write-Step '4/7 git 提交 / 标签 / 推送'
+Write-Step '4/8 git 提交 / 标签 / 推送'
 if ($SkipGit) {
     Write-Skip '按参数要求跳过'
 } else {
@@ -152,7 +156,7 @@ if ($SkipGit) {
 }
 
 # ── 5. 取得 GitHub 令牌 ────────────────────────────────────────────────
-Write-Step '5/7 准备 GitHub 鉴权'
+Write-Step '5/8 准备 GitHub 鉴权'
 $useGh = $false
 if (Get-Command gh -ErrorAction SilentlyContinue) {
     gh auth status *> $null
@@ -202,6 +206,55 @@ $remoteUrl = (git remote get-url origin) 2>$null
 if ($remoteUrl -match 'github\.com[:/]([^/]+)/([^/.]+)') { $repoSlug = "$($matches[1])/$($matches[2])" }
 Write-Ok "目标仓库: $repoSlug"
 
+# ── 6. 更新仓库 About ──────────────────────────────────────────────────
+Write-Step '6/8 更新 GitHub 仓库 About'
+$about = [string]$pkg.about
+if (-not $about) {
+    $about = [string]$pkg.description
+    Write-Warn2 'package.json 没有 about 字段，回退用 description（只有中文）'
+}
+$about = $about.Trim()
+if (-not $SkipAbout -and $about.Length -gt 350) { throw "About 超过 GitHub 的 350 字符限制：$($about.Length) 字符" }
+if ($about -match '[\r\n]') { throw 'About 不能包含换行' }
+$aboutState = '已更新'
+if (-not $about) {
+    $aboutState = '未更新（无文本）'
+    Write-Warn2 'About 与 description 都为空，跳过更新'
+} elseif ($SkipAbout) {
+    $aboutState = '已跳过（-SkipAbout）'
+    Write-Skip '按参数要求跳过'
+} elseif ($DryRun) {
+    $aboutState = '将更新'
+    Write-Plan "把仓库 About 更新为（$($about.Length) 字符）：$about"
+} elseif (-not $useGh -and -not $env:GH_TOKEN) {
+    $aboutState = '未更新（无令牌）'
+    Write-Warn2 '无令牌，跳过 About 更新；请手工把仓库 About 改成：'
+    Write-Host "      $about"
+} else {
+    if ($useGh) {
+        gh api --method PATCH "repos/$repoSlug" -f "description=$about" *> $null
+        if ($LASTEXITCODE -ne 0) { throw "更新 About 失败（gh api 退出码 $LASTEXITCODE）" }
+    } else {
+        $aboutFile = Join-Path $env:TEMP "scl-about-$version.json"
+        $aboutRespFile = Join-Path $env:TEMP "scl-about-resp-$version.json"
+        $aboutPayload = @{ description = $about } | ConvertTo-Json -Depth 3
+        [System.IO.File]::WriteAllText($aboutFile, $aboutPayload, (New-Object System.Text.UTF8Encoding($false)))
+        $codeA = & curl.exe -sS -o $aboutRespFile -w '%{http_code}' @proxyArgs `
+            -X PATCH `
+            -H 'User-Agent: dsh-release' -H "Authorization: Bearer $env:GH_TOKEN" `
+            -H 'Accept: application/vnd.github+json' -H 'Content-Type: application/json; charset=utf-8' `
+            --data-binary "@$aboutFile" "https://api.github.com/repos/$repoSlug"
+        if ($codeA -ne '200') {
+            $msg = ''
+            try { $msg = ([System.IO.File]::ReadAllText($aboutRespFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json).message } catch { }
+            Remove-Item $aboutFile, $aboutRespFile -Force -ErrorAction SilentlyContinue
+            throw "更新 About 失败（HTTP $codeA）: $msg"
+        }
+        Remove-Item $aboutFile, $aboutRespFile -Force -ErrorAction SilentlyContinue
+    }
+    Write-Ok "About 已更新（$($about.Length) 字符）: https://github.com/$repoSlug"
+}
+
 # 该标签的 Release 是否已存在（重跑脚本时给明确提示，不当成失败）
 $existingRelease = $null
 if (-not $SkipRelease) {
@@ -220,8 +273,8 @@ if (-not $SkipRelease) {
     }
 }
 
-# ── 6. 创建 Release 并上传 zip ─────────────────────────────────────────
-Write-Step '6/7 创建 Release 并上传 zip'
+# ── 7. 创建 Release 并上传 zip ─────────────────────────────────────────
+Write-Step '7/8 创建 Release 并上传 zip'
 $assetUrl = "https://github.com/$repoSlug/releases/download/$tag/$zipName"
 if ($SkipRelease) {
     Write-Skip '按参数要求跳过'
@@ -278,13 +331,14 @@ if ($SkipRelease) {
     }
 }
 
-# ── 7. 结果汇总 ────────────────────────────────────────────────────────
-Write-Step '7/7 汇总'
+# ── 8. 结果汇总 ────────────────────────────────────────────────────────
+Write-Step '8/8 汇总'
 Write-Host "    版本      : $version"
 Write-Host "    标签      : $tag"
 Write-Host "    发行包    : $zipPath"
 Write-Host "    SHA256    : $sha"
 Write-Host "    下载直链  : $assetUrl"
 Write-Host "    Release   : https://github.com/$repoSlug/releases/tag/$tag"
+Write-Host "    About     : $aboutState"
 Write-Host ''
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue }

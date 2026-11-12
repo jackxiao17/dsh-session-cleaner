@@ -111,7 +111,8 @@
 2. 打包出 `dsh-session-cleaner-<版本>.zip` 并打印 SHA256；
 3. 覆盖同步到 `~/.dsh/profiles/desktop/` 下的 `local\` 与 `node_modules\` 两处；
 4. `git commit` → 打 `v<版本>` 标签 → 推送 main 与标签；
-5. 创建 Release（标题统一为 `dsh-session-cleaner v<版本>`）并上传 zip。
+5. 更新仓库 About（取 `package.json#about`，缺省回退 `description`；超过 GitHub 的 350 字符会直接报错）；
+6. 创建 Release（标题统一为 `dsh-session-cleaner v<版本>`）并上传 zip。
 
 ```powershell
 # 先干跑看一遍将要做的事（不改任何东西）
@@ -121,7 +122,7 @@ pwsh -NoProfile -File scripts/release.ps1 -DryRun
 pwsh -NoProfile -File scripts/release.ps1
 ```
 
-参数：`-SkipGit`、`-SkipSync`、`-SkipRelease` 可分别跳过某一步；`-Proxy ''` 关闭代理（默认走 `http://127.0.0.1:7890`）；`-Token` 或环境变量 `GH_TOKEN` 指定令牌，都没有时脚本会尝试读取 Windows 凭据管理器里 `git:https://github.com` 的令牌（只放环境变量，不打印、不进命令行历史），仍取不到则跳过 Release 创建并提示手工上传。
+参数：`-SkipGit`、`-SkipSync`、`-SkipAbout`、`-SkipRelease` 可分别跳过某一步；`-Proxy ''` 关闭代理（默认走 `http://127.0.0.1:7890`）；`-Token` 或环境变量 `GH_TOKEN` 指定令牌，都没有时脚本会尝试读取 Windows 凭据管理器里 `git:https://github.com` 的令牌（只放环境变量，不打印、不进命令行历史），仍取不到则跳过 Release 创建并提示手工上传。
 
 ### 改完代码先跑一遍验证台
 

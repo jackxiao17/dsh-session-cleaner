@@ -113,7 +113,8 @@ Key points:
 2. Build `dsh-session-cleaner-<version>.zip` and print its SHA256
 3. Overwrite both directories under `~/.dsh/profiles/desktop/` (`local\` and `node_modules\`)
 4. `git commit` → tag `v<version>` → push `main` and the tag
-5. Create the Release (title always `dsh-session-cleaner v<version>`) and upload the zip
+5. Update the repository About (from `package.json#about`, falling back to `description`; aborts if it exceeds GitHub's 350-character limit)
+6. Create the Release (title always `dsh-session-cleaner v<version>`) and upload the zip
 
 ```powershell
 # Dry run first: only prints what it would do, changes nothing
@@ -123,7 +124,7 @@ pwsh -NoProfile -File scripts/release.ps1 -DryRun
 pwsh -NoProfile -File scripts/release.ps1
 ```
 
-Flags: `-SkipGit`, `-SkipSync`, `-SkipRelease` skip individual steps; `-Proxy ''` disables the proxy (default `http://127.0.0.1:7890`); `-Token` or the `GH_TOKEN` environment variable supplies a token — otherwise the script tries the `git:https://github.com` credential in Windows Credential Manager (kept in a process environment variable only: never printed, never in shell history). If no token is found it skips the Release and prints the manual upload hint.
+Flags: `-SkipGit`, `-SkipSync`, `-SkipAbout`, `-SkipRelease` skip individual steps; `-Proxy ''` disables the proxy (default `http://127.0.0.1:7890`); `-Token` or the `GH_TOKEN` environment variable supplies a token — otherwise the script tries the `git:https://github.com` credential in Windows Credential Manager (kept in a process environment variable only: never printed, never in shell history). If no token is found it skips the Release and prints the manual upload hint.
 
 ### Run the verification harness before releasing
 
