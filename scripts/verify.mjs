@@ -744,6 +744,31 @@ console.log("\n[9] 客户端 bundle（slot 注册与语言包）");
   ok(effects.some(l => String(l).includes("styles")), "注入了样式 effect");
 }
 
+// ───────────────────────── 9b. 0.2.2-rc.2 适配项 ─────────────────────────
+
+console.log("\n[9b] 浮层拖拽区与旧格式工件");
+{
+  ok(Array.isArray(mod.ARTIFACT_NAMES), "ARTIFACT_NAMES 已导出");
+  for (const name of [
+    "session.v4.jsonl.zstd", "session.v4.jsonl",
+    "session.v3.jsonl", "session.v2.jsonl",
+    "session.v1.jsonl.zstd", "session.v1.jsonl",
+    "session.jsonl.zstd", "session.jsonl"
+  ]) {
+    ok(mod.ARTIFACT_NAMES.includes(name), `工件扫描覆盖 ${name}`);
+  }
+  const clientSource = await readFile(join(ROOT, "lib", "client.js"), "utf8");
+  const layers = [...clientSource.matchAll(/className: "scl-layer"/g)];
+  eq(layers.length, 3, "三个全屏浮层都还在");
+  for (const [index, match] of layers.entries()) {
+    const nearby = clientSource.slice(match.index, match.index + 400);
+    ok(nearby.includes('"data-window-drag-exclude"'), `第 ${index + 1} 个浮层声明了 data-window-drag-exclude`);
+  }
+  const manifest = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8"));
+  ok(typeof manifest.engines?.dsh === "string" && manifest.engines.dsh.includes("0.2.2-rc.2"),
+    "package.json 用 engines.dsh 声明兼容版本");
+}
+
 // ───────────────────────── 10. 截图声明与仓库一致性 ─────────────────────────
 // contributing.md 的规矩：screenshots.json 放在 package.json 旁边，1-8 条，
 // 相对路径不能跳出插件目录。这里顺手查一遍，防止改名后图片 404。

@@ -40,8 +40,8 @@
 
 ## 兼容性
 
-- **已在 DeepSeek Harness `0.2.2-rc.1`（桌面版，`dsh web` 的 web profile）上复核通过**：`0.2.2-rc.1` 全量源码核对 + 真机接口实测（`/session-cleaner/api/health`、`/trash/list` 均 200）；`0.2.1-rc.3` 上做过删除、恢复、回收站浏览与对话记录回看的真机验证，`0.2.1-rc.2` 上做过含子会话级联与全盘残留扫描的完整回归
-- 依赖的宿主契约（会话日志格式 v4 与 zstd 帧布局、`session_projcache` 存储域 v7、`workspaceRegistry` / `schedule` / `storageDomain` / `webServer` 服务、前端 slot 与 `__ModuleLoader__`）均逐一与 `0.2.2-rc.1` 源码核对，无不适配项
+- **已在 DeepSeek Harness `0.2.2-rc.2`（桌面版，`dsh web` 的 web profile）上复核通过**：`0.2.2-rc.1 → 0.2.2-rc.2` 升级项逐条核对 + 真机接口实测（`/session-cleaner/api/health`、`/trash/list` 均 200）；`0.2.1-rc.3` 上做过删除、恢复、回收站浏览与对话记录回看的真机验证，`0.2.1-rc.2` 上做过含子会话级联与全盘残留扫描的完整回归
+- 依赖的宿主契约（会话日志格式 v4 与 zstd 帧布局、`session_projcache` 存储域 v7、`workspaceRegistry` / `schedule` / `storageDomain` / `webServer` 服务、前端 slot 与 `__ModuleLoader__`、macOS 窗口拖拽区）均逐一与 `0.2.2-rc.2` 源码核对，无不适配项
 - **向下兼容没有逐一验证，因此不做承诺**。可以说明的是它的失效方式：所有宿主 API 调用都带存在性检查，取不到就回落到"直接操作文件"的等价路径，所以老版本上最坏表现是**功能少一点**（例如槽位无法还原 → 会话恢复到侧栏顶部，并在回报里如实说明），不会删错东西，也不会留下看不见的垃圾
 - `0.1.x` 未验证：那一系的会话格式经历过 v0→v4 迁移、宿主 API 变动也大，不建议直接用
 - 升级 DSH 大版本后若插件失灵，表现是菜单项/按钮消失或操作报错，不会伤及会话数据；回收站里的数据仍在 `~/.dsh/dsh-session-cleaner/trash/`，可手工搬回 `sessions/<项目段>/<会话id>/`
@@ -80,7 +80,8 @@
 - **同 id 有两份日志目录时拒绝操作**：这是宿主自己都拒绝解析的损坏状态，插件会列出来让你先手工处理，而不是删掉一份、留下另一份却报成功
 - **崩溃安全**：快照先写、文件后搬，之后再把快照升级为完成态；启动时做一次双向对账——"没搬成"的残留快照会回滚（父会话带子会话时按**全有或全无**处理：只要还有一个成员留在原位，就把已搬走的逐个搬回），回收站里缺快照的孤儿目录会被收编成"数据不完整"条目（可见、可彻底删除，但不能恢复，因为原路径已无从得知）
 - **0.7.0 移除了两个没人调用的 HTTP 端点**：`POST /delete`（不进回收站的物理删除）与 `POST /status`。现在删除只有一条链：移入回收站 → 彻底删除
-- 只在本机桌面版（`dsh web` 的 web profile）的 **DeepSeek Harness 0.2.2-rc.1** 上验证过；别的部署形态、更早的 0.2.x 与 0.1.x 都没测过（见上面「兼容性」）
+- 只在本机桌面版（`dsh web` 的 web profile）的 **DeepSeek Harness 0.2.2-rc.2** 上验证过；别的部署形态、更早的 0.2.x 与 0.1.x 都没测过（见上面「兼容性」）
+- **Windows 未做真机验证**：插件只用跨平台的 `node:fs` / `node:path` API，没有 macOS 专属调用；`data-platform=darwin` 的玻璃样式只在 Mac 生效，Windows 走默认令牌。会话目录与回收站同在 `dshHome` 下，`rename` 不跨卷；万一宿主仍占着日志句柄，操作会报错而不会删坏。首次在 Windows 上使用时，建议先拿一条可弃会话走一遍「删除 → 恢复」再正式用
 
 ## 卸载 / 回滚
 
@@ -133,6 +134,16 @@ node scripts\verify.mjs
 全绿（末行 `N 通过 / 0 失败`）再发版。
 
 ## 更新记录
+
+### 0.7.8（适配 DSH 0.2.2-rc.2 + macOS 浮层拖拽区）
+
+- **兼容性复核：DeepSeek Harness `0.2.2-rc.2` 源码逐项核对 + 真机接口实测**（`/session-cleaner/api/health`、`/trash/list` 均 200）：`rc.1 → rc.2` 的 19 项升级全部过了一遍，只有 `window-drag-regions` 命中本插件
+- **修掉 macOS 上回收站浮层会拖窗口的问题**（`0.2.2-rc.2` 的 `window-drag-regions`）：Electron 的 app-region 按几何矩形算，覆盖 `data-window-drag` 行的浮层必须自己声明排除区。三个全屏浮层（回收站列表、对话详情、确认弹窗）现在都带 `data-window-drag-exclude`，打开时顶部条不再落到侧栏的拖动区
+- **`session/disposed` 回落事件改传真实 Session**：宿主签名是 `(session: Session)`，投影缓存按对象身份记账；以前 detach 失败时传 `{id}`，现在有 live 句柄就传句柄，只有冷会话才退回 id 形状
+- **工件扫描补齐旧格式**：`ARTIFACT_NAMES` 增加 `session.v1.jsonl(.zstd)` 与 v2–v4 的纯文本变体，`compression: 'none'` 的 profile 和遗留 v1 目录也能识别
+- **macOS 玻璃底色改引宿主令牌**：`--dsw-specific-sidebar-glass-fill` / `hover` / `collapsed-*`，浅色深色与收起态都跟随主题，不再硬编码四个十六进制色
+- `package.json` 增加 `engines.dsh: ">=0.2.2-rc.2 <0.3.0"`：宿主插件兼容性检查现在能识别不匹配并提示，而不是静默加载
+- 验证台同步增加浮层拖拽属性与旧格式工件的断言：**226 项通过 / 0 失败**
 
 ### 0.7.7（插件页只显示简介，不再铺整篇 README）
 
