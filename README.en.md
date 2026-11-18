@@ -40,8 +40,8 @@ Grab the latest archive from the [Releases page](https://github.com/jackxiao17/d
 
 ## Compatibility
 
-- **Re-verified on DeepSeek Harness `0.2.2-rc.2`** (desktop build, the `dsh web` web profile): a line-by-line pass over the `0.2.2-rc.1 → 0.2.2-rc.2` upgrade items plus live probes (`/session-cleaner/api/health` and `/trash/list` both return 200); the earlier live pass (delete, restore, the recycle bin and the chat-log viewer) ran on `0.2.1-rc.3`, and the full regression (subagent cascade plus a whole-`~/.dsh` residue scan) on `0.2.1-rc.2`
-- Every host contract it relies on was checked against the `0.2.2-rc.2` source: session log format v4 and its zstd frame layout, the `session_projcache` storage domain v7, the `workspaceRegistry` / `schedule` / `storageDomain` / `webServer` services, the client slots plus `__ModuleLoader__`, and the macOS window drag regions — nothing incompatible
+- **Re-verified on DeepSeek Harness `0.2.2-rc.5`** (desktop build, the `dsh web` web profile): the upgrade items between `0.2.2-rc.2` and `0.2.2-rc.5` walked item by item (only the `v0.2.2-rc.3` / `v0.2.2-rc.4` guides exist in between, neither touching anything this plugin depends on) plus a full host-source cross-check and live probes (`/session-cleaner/api/health` and `/trash/list` both return 200); the earlier live pass (delete, restore, the recycle bin and the chat-log viewer) ran on `0.2.1-rc.3`, and the full regression (subagent cascade plus a whole-`~/.dsh` residue scan) on `0.2.1-rc.2`
+- Every host contract it relies on was checked against the `0.2.2-rc.5` source: session log format v4 and its zstd frame layout, the `session_projcache` storage domain v7, the `workspaceRegistry` / `schedule` / `storageDomain` / `webServer` services, the client slots plus `__ModuleLoader__`, and the macOS window drag regions — nothing incompatible
 - **Backward compatibility is not verified, so it is not promised.** What can be said is how it fails: every host API call is guarded by an existence check and falls back to the equivalent file-level path, so on an older build the worst case is **less functionality** (for example the slot cannot be restored, so the session returns to the top of the sidebar — reported honestly), never deleting the wrong thing or leaving invisible garbage
 - `0.1.x` is untested: that line went through v0→v4 format migrations and large API changes, so it is not recommended
 - If a major DSH upgrade breaks the plugin, the symptom is a missing menu item/button or an error on an action — session data is never harmed. Binned data stays under `~/.dsh/dsh-session-cleaner/trash/` and can be moved back by hand to `sessions/<proj>/<id>/`
@@ -80,7 +80,7 @@ Grab the latest archive from the [Releases page](https://github.com/jackxiao17/d
 - **Two log directories for the same id are refused**: that is a corrupt layout the host itself refuses to resolve, so the plugin lists the paths for you to handle by hand instead of deleting one copy, leaving the other, and reporting success
 - **Crash safety**: the snapshot is written before the files move and upgraded to its final state afterwards; startup runs a two-way reconciliation — a leftover "never moved" snapshot is rolled back (with subagents this is all-or-nothing: if any member is still at home, the ones already moved go back), and a bin directory without a snapshot is adopted as a "data incomplete" entry (visible and permanently deletable, but not restorable, because its original path is unknowable)
 - **0.7.0 removed two HTTP endpoints nobody called**: `POST /delete` (physical delete without the bin) and `POST /status`. Deletion now has a single path: move to the bin → delete forever
-- Verified on the local desktop build (the `dsh web` web profile) only, on DeepSeek Harness `0.2.2-rc.2`; no other deployment shape was tested
+- Verified on the local desktop build (the `dsh web` web profile) only, on DeepSeek Harness `0.2.2-rc.5`; no other deployment shape was tested
 - **Windows has not been tested on a real machine**: the plugin only uses cross-platform `node:fs` / `node:path` APIs and has no macOS-only calls; the `data-platform=darwin` glass styling applies on macOS only, while Windows uses the default tokens. Session directories and the bin live under the same `dshHome`, so `rename` never crosses volumes; if the host still holds a log handle, the action fails with an error instead of deleting anything. On first use on Windows, run one disposable session through delete → restore before relying on it
 
 ## Uninstall / rollback
@@ -137,6 +137,15 @@ node scripts\verify.mjs
 Release only when it ends with `N 通过 / 0 失败` (N passed / 0 failed).
 
 ## Changelog
+
+### 0.7.9 (DSH 0.2.2-rc.5 adaptation + three data-safety fixes)
+
+- **Compatibility re-checked against DeepSeek Harness `0.2.2-rc.5`** (full source audit plus live probes: `/session-cleaner/api/health` and `/trash/list` both return 200): between `0.2.2-rc.2` and `0.2.2-rc.5` only the `v0.2.2-rc.3` / `v0.2.2-rc.4` upgrade guides exist and neither touches session lifecycle or storage; every Host service, client slot, log format v4, projection-cache domain, `schedule` and `webServer` contract is aligned — nothing incompatible
+- **Fixed a "delete that never finished" being purged as a committed entry** (the most serious one): on Windows `rename` can hit EBUSY, leaving an entry whose snapshot was written but whose files never moved into the bin (`stage=prepared`). Such an entry was previously treated by retention cleanup and "Empty Recycle Bin" as a deleted session, wiping the projection-cache row and every schedule of a session that still lived at home. Prepared entries now stay out of the listing and out of auto-cleanup, and a permanent delete applies the same adjudication startup reconciliation uses: roll back what can be rolled back, drop the snapshot, and only purge once everything is in the bin
+- **Bounded retry on all four rename points** for the transient codes Windows throws (EBUSY / EPERM / ENOTEMPTY / EACCES, up to 8 attempts, 50ms exponential backoff capped at 2s) — which removes the main trigger behind the item above
+- **Scheduled tasks that are still running are stopped when a session enters the bin**: its log is about to leave its slot, so due tasks would only fail one by one (the host records a warn, retries nothing, deletes no row). History rows stay untouched until permanent delete, which still clears them. Task creation cannot reproduce one verbatim, so this step is irreversible — but it follows the exact path the host's own archive uses
+- **`readMeta` tolerates truncated or corrupt snapshots**: a damaged meta now yields the same 404 session-not-found as "no such entry" instead of a bare 500; the detail and restore endpoints no longer leak a raw SyntaxError to callers
+- The verification harness adds prepared-misdelete, interrupted-restore residue and corrupt-snapshot cases: **248 passed / 0 failed**
 
 ### 0.7.8 (DSH 0.2.2-rc.2 adaptation + macOS overlay drag regions)
 

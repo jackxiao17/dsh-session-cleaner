@@ -186,6 +186,7 @@ async function call(host, method, path, body) {
 console.log("\n[1] 纯函数与路径校验");
 eq(mod.name, "dsh-session-cleaner", "导出插件名");
 ok(typeof mod.apply === "function", "导出 apply()");
+ok(typeof mod.renameWithRetry === "function", "导出 renameWithRetry（Windows rename 撞 EBUSY/EPERM 时退避重试）");
 for (const bad of ["", "  ", ".", "..", "a/b", "a\\b", "a:b", "x\u0000y", "trail.", "trail ", 'q"q', "a*b"]) {
   let threw = false;
   try { mod.assertSessionId(bad); } catch { threw = true; }
@@ -242,7 +243,8 @@ console.log("\n[2] 移入回收站 / 恢复");
   const listedItem = listed.body.result.items.find(i => i.id === SID);
   ok(listedItem !== undefined && listedItem.projcacheRow === undefined, "列表响应不携带投影缓存行原文（只回展示字段）");
   eq(meta.schedules.length, 3, "快照里抄录了该会话的 3 条定时任务（新格式 + 老格式）");
-  eq(trashed.body.result.schedulesKept, 3, "响应回报定时任务仍在");
+  eq(trashed.body.result.schedulesStopped, 1, "移入回收站当场停掉进行中的那 1 条任务");
+  eq(trashed.body.result.schedulesKept, 2, "响应回报只剩 2 条历史行（进行中的那条已停）");
   eq(trashed.body.result.cacheRemoved, true, "投影缓存行已删");
   eq(trashed.body.result.cacheBackupsRemoved, 1, "投影缓存备份文件已删");
   ok(!existsSync(join(home, "storages", "session_projcache", "sessions", `${SID}.json`)), "缓存行文件不在了");
@@ -250,7 +252,8 @@ console.log("\n[2] 移入回收站 / 恢复");
   ok(host.projRows.get(SID) === "deleted-by-domain", "走的是宿主存储域的表删除");
   eq(host.slots.join(","), [ANCHOR + "-prev", ANCHOR].join(","), "记账槽位已摘掉");
   eq(host.global.pinnedSessionIds.length, 0, "置顶已清");
-  eq(host.schedules.filter(s => ownedBy(s, SID)).length, 3, "回收站阶段不动定时任务");
+  eq(host.schedules.filter(s => ownedBy(s, SID)).length, 2,
+    "进行中任务已停、历史行留在盘上（彻底删除时才清）");
 
   const restored = await call(host, "POST", "/trash/restore", { sessionId: SID });
   eq(restored.status, 200, "POST /trash/restore 返回 200");
@@ -292,6 +295,8 @@ console.log("\n[3] 彻底删除（含定时任务与空工程目录）");
   ok(!existsSync(join(home, "dsh-session-cleaner", "trash", "meta", `${SID}.json`)), "快照已删");
   ok(host.call.stopSessionTasks >= 1, "调用了宿主的 stopSessionTasks");
   ok(host.call.scheduleEdit.length >= 1, "0.2.2-rc.1 的历史行用 edit({id,action:'delete'}) 删掉");
+  ok(host.call.scheduleEdit.every(([actor]) => actor === undefined),
+    "edit(delete) 不传伪造的 actorSessionId（0.7.9：宿主只把这一参当通知归属用）");
   eq(host.call.scheduleDelete.length, 0, "不再依赖 0.2.2-rc.1 已移除的 schedule.delete");
   ok(host.schedules.every(s => !ownedBy(s, SID)), "该会话的定时任务（含已结束的历史行）都没了");
   ok(host.schedules.some(s => ownedBy(s, "other-session")), "别的会话的定时任务没被误删");
@@ -824,6 +829,91 @@ console.log("\n[10] screenshots.json 与 README 图片");
   const enHead = (await readFile(join(ROOT, "README.en.md"), "utf8")).slice(0, 400);
   ok(zhHead.includes("README.en.md"), "中文版顶部有 English 链接");
   ok(enHead.includes("README.md"), "英文版顶部有简体中文链接");
+}
+
+// ───────────────────────── 11. prepared 中间态与损坏快照的保守处理 ─────────────────────────
+// Windows 上 rename 会撞 EBUSY/EPERM：删除可能停在「快照写了、文件没搬」的中间态。
+// 这种项既不能当已删除清掉缓存行与定时任务，也不能被保留期清理扫走。
+
+console.log("\n[11] prepared 中间态与损坏快照的保守处理");
+{
+  // 场景一：删除卡在原地——回收站里没有目录、原会话目录还活着、还挂着活动定时任务。
+  // 彻底删除必须跳过并撤快照，绝不能把活会话的痕迹一起抹掉。
+  const { home, row } = await makeHome();
+  const host = makeHost(home);
+  mod.apply(host.ctx);
+  const PREPARED_ID = "session-prepared-7777";
+  await mkdir(join(home, "sessions", PROJ, PREPARED_ID), { recursive: true });
+  await writeFile(join(home, "sessions", PROJ, PREPARED_ID, "session.jsonl"),
+    JSON.stringify({ type: "session", id: PREPARED_ID, cwd: "F:\\work\\demo", createdAt: 1 }) + "\n");
+  await writeFile(join(home, "storages", "session_projcache", "sessions", `${PREPARED_ID}.json`), row);
+  await mkdir(dirname(join(home, "dsh-session-cleaner", "trash", "meta", `${PREPARED_ID}.json`)), { recursive: true });
+  await writeFile(join(home, "dsh-session-cleaner", "trash", "meta", `${PREPARED_ID}.json`), JSON.stringify({
+    version: 3, id: PREPARED_ID, stage: "prepared", filesMoved: false,
+    originalDir: join(home, "sessions", PROJ, PREPARED_ID),
+    deletedAt: Date.now() - 40 * 24 * 60 * 60 * 1000, bytes: 10
+  }));
+  host.schedules.push({ id: "schedule-pg", target: { sessionId: PREPARED_ID },
+    involvedSessionIds: [PREPARED_ID], status: "active", kind: "at", title: "t", prompt: "p",
+    scheduledAt: "2099-01-01T00:00:00.000Z" });
+
+  const skipped = await call(host, "POST", "/trash/delete", { sessionIds: [PREPARED_ID] });
+  eq(skipped.status, 200, "卡在原地的 prepared 项 → 200 且跳过");
+  eq(skipped.body.result.results[0].deleted, false, "没有把它当成已删除条目处理");
+  eq(skipped.body.result.results[0].skipped, true, "如实回报 skipped");
+  ok(String(skipped.body.result.results[0].reason).includes("没有完成"),
+    "回报原因点明这是未完成的删除（reason=" + skipped.body.result.results[0].reason + "）");
+  ok(!existsSync(join(home, "dsh-session-cleaner", "trash", "meta", `${PREPARED_ID}.json`)),
+    "这条半途快照被撤掉");
+  ok(existsSync(join(home, "sessions", PROJ, PREPARED_ID)), "原会话目录原样还在（没被误删）");
+  ok(existsSync(join(home, "storages", "session_projcache", "sessions", `${PREPARED_ID}.json`)),
+    "活会话的投影缓存行没被误清");
+  ok(host.schedules.some(s => ownedBy(s, PREPARED_ID)), "活会话的进行中定时任务没被误清");
+  await rm(home, { recursive: true, force: true });
+
+  // 场景二：成员全都在回收站里（rename 全成功、只是 finalize 那一步崩了）。
+  // 这是完成了但没提交的删除，必须继续按正式条目清干净。
+  const hb = await makeHome();
+  const hostb = makeHost(hb.home);
+  mod.apply(hostb.ctx);
+  const B_ID = "session-bbbb-6666";
+  const BC_ID = "session-bc-6666";
+  const binItemsB = join(hb.home, "dsh-session-cleaner", "trash", "items");
+  const binMetaB = join(hb.home, "dsh-session-cleaner", "trash", "meta");
+  await mkdir(join(binItemsB, B_ID, ".children"), { recursive: true });
+  await mkdir(join(binItemsB, B_ID, ".children", BC_ID), { recursive: true });
+  await writeFile(join(binItemsB, B_ID, ".children", BC_ID, "session.jsonl"),
+    JSON.stringify({ type: "session", id: BC_ID, cwd: "F:\\work\\demo", createdAt: 1 }) + "\n");
+  await mkdir(dirname(join(binMetaB, `${B_ID}.json`)), { recursive: true });
+  await writeFile(join(binMetaB, `${B_ID}.json`), JSON.stringify({
+    version: 3, id: B_ID, stage: "prepared", filesMoved: true,
+    originalDir: join(hb.home, "sessions", PROJ, B_ID), bytes: 20,
+    descendants: [{ id: BC_ID, originalDir: join(hb.home, "sessions", PROJ, BC_ID) }]
+  }));
+  const purgedB = await call(hostb, "POST", "/trash/delete", { sessionIds: [B_ID] });
+  eq(purgedB.body.result.results[0].deleted, true, "全在回收站的 prepared 项按正式条目继续清");
+  eq(purgedB.body.result.results[0].descendantsPurged, 1, "后代跟着一起收尾");
+  ok(!existsSync(join(binItemsB, B_ID)), "回收站目录（含 .children）已删");
+  ok(!existsSync(join(binMetaB, `${B_ID}.json`)), "快照已撤");
+  await rm(hb.home, { recursive: true, force: true });
+
+  // 场景三：meta 文件写坏了（磁盘上的 JSON 语法错误）。
+  // 必须和"不存在"一样按找不到处理（404），而不是裸 500 把整批操作打挂。
+  const hc = await makeHome();
+  const hostc = makeHost(hc.home);
+  mod.apply(hostc.ctx);
+  const C_ID = "session-corrupt-8888";
+  await mkdir(dirname(join(hc.home, "dsh-session-cleaner", "trash", "meta", `${C_ID}.json`)), { recursive: true });
+  await writeFile(join(hc.home, "dsh-session-cleaner", "trash", "meta", `${C_ID}.json`), "{broken json!!");
+  const listC = await call(hostc, "POST", "/trash/list");
+  ok(listC.body.result.items.every(i => i.id !== C_ID), "坏 meta 的条目不出现在列表里");
+  const detailC = await call(hostc, "POST", "/trash/detail", { sessionId: C_ID });
+  eq(detailC.status, 404, "坏 meta 的详情按找不到处理（不再是裸 500）");
+  eq(detailC.body.code, "session-not-found", "错误码 session-not-found");
+  const restoreC = await call(hostc, "POST", "/trash/restore", { sessionId: C_ID });
+  eq(restoreC.status, 404, "坏 meta 的恢复也按找不到处理（不再是裸 500）");
+  eq(restoreC.body.code, "session-not-found", "错误码 session-not-found");
+  await rm(hc.home, { recursive: true, force: true });
 }
 
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`);

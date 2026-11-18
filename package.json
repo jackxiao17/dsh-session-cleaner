@@ -1,8 +1,8 @@
 {
   "name": "dsh-session-cleaner",
-  "version": "0.7.8",
-  "description": "DSH 会话清理插件：侧栏会话「···」菜单一键把会话搬进回收站（目录整体 rename 迁走，原子操作），回收站支持标题/正文搜索、恢复与彻底删除。删除时同步摘掉工作区记账、置顶与归档标记，清掉投影缓存行（含备份文件），带子代理的会话整棵后代树一起处理；恢复时逐项还原，包括侧栏原位置。彻底删除时再清掉绑定该会话的定时任务与空掉的工程目录。已适配并真机验证 DeepSeek Harness 0.2.2-rc.2（宿主契约全量源码核对，覆盖浮层拖拽区、事件负载与回收站接口），删除后全盘无残留。",
-  "about": "DSH 会话清理：把会话连子代理整棵树搬进真回收站，删除即清干净（记账/置顶/归档/投影缓存行/定时任务），恢复回侧栏原位；已在 DSH 0.2.2-rc.2 复核 | DSH session cleaner: moves a session and its whole subagent tree into a real recycle bin, clears every trace on delete (accounting, pins, archive, projection cache, schedules), restores to the original sidebar slot; verified on DSH 0.2.2-rc.2",
+  "version": "0.7.9",
+  "description": "DSH 会话清理插件：侧栏会话「···」菜单一键把会话搬进回收站（目录整体 rename 迁走，原子操作），回收站支持标题/正文搜索、恢复与彻底删除。删除时同步摘掉工作区记账、置顶与归档标记，清掉投影缓存行（含备份文件），带子代理的会话整棵后代树一起处理；恢复时逐项还原，包括侧栏原位置。彻底删除时再清掉绑定该会话的定时任务与空掉的工程目录。已适配并真机验证 DeepSeek Harness 0.2.2-rc.5（宿主契约全量源码核对，覆盖浮层拖拽区、事件负载与回收站接口），删除后全盘无残留。",
+  "about": "DSH 会话清理：把会话连子代理整棵树搬进真回收站，删除即清干净（记账/置顶/归档/投影缓存行/定时任务），恢复回侧栏原位；已在 DSH 0.2.2-rc.5 复核 | DSH session cleaner: moves a session and its whole subagent tree into a real recycle bin, clears every trace on delete (accounting, pins, archive, projection cache, schedules), restores to the original sidebar slot; verified on DSH 0.2.2-rc.5",
   "license": "MIT",
   "keywords": [
     "dsh",
