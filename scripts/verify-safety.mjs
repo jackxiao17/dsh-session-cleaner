@@ -1,4 +1,4 @@
-// dsh-session-cleaner 0.8.0 独立安全回归台：node scripts/verify-safety.mjs
+// dsh-session-cleaner 0.8.1 独立安全回归台：node scripts/verify-safety.mjs
 // 维护者工具，不参与插件运行、不进发行包。所有用例共用唯一临时根目录，
 // 每个用例再创建独立子目录；无论通过或失败，最外层 finally 都会递归清理。
 import assert from "node:assert/strict";
@@ -118,6 +118,13 @@ function makeHost(fixture, options = {}) {
     persistenceStat: [],
     jobsList: [],
     terminalsHasOwnerActivity: [],
+    forceDispose: [],
+    subagentList: [],
+    subagentDrain: [],
+    subagentRoot: [],
+    subagentCapacity: [],
+    cacheWrite: [],
+    lifecycle: [],
     stopSessionTasks: [],
     scheduleDelete: [],
     scheduleEdit: [],
@@ -225,7 +232,8 @@ function makeHost(fixture, options = {}) {
   };
 
   const sessionProjectionCache = {
-    markClean(session) { calls.cacheMarkClean.push(session?.id); }
+    markClean(session) { calls.cacheMarkClean.push(session?.id); },
+    ...(options.noCacheWrite ? {} : { async write(session) { calls.cacheWrite.push(session?.id); calls.lifecycle.push(`cache:${session?.id}`); } })
   };
 
   let scheduleClock = 0;
@@ -310,15 +318,65 @@ function makeHost(fixture, options = {}) {
   };
 
   const terminals = options.noTerminals ? undefined : {
-    hasOwnerActivity(sessionId) {
-      calls.terminalsHasOwnerActivity.push(sessionId);
+    hasOwnerActivity(owner) {
+      calls.terminalsHasOwnerActivity.push(owner);
       if (options.terminalsError) throw new Error("injected terminal activity failure");
       return options.terminalActivity === true;
     }
   };
 
+  const createCapturedHandle = (id) => {
+    const session = { id, header: makeHeader(id) };
+    const agent = {
+      id,
+      session,
+      cancel(cause) { calls.cancel.push({ id, cause: clone(cause) }); },
+      scope: { async dispose() { calls.scopeDispose.push(id); } }
+    };
+    liveAgents.set(id, agent);
+    liveSessions.set(id, session);
+    return {
+      agent,
+      async dispose() {
+        calls.forceDispose.push(id);
+        calls.lifecycle.push(`dispose:${id}`);
+        if (options.forceDisposeError) throw new Error("injected official dispose failure");
+        if (options.forceDisposeStillLive !== true) {
+          liveAgents.delete(id);
+          liveSessions.delete(id);
+        }
+      }
+    };
+  };
+  const agentLoop = {
+    async createAgent({ sessionId }) { return createCapturedHandle(sessionId); },
+    async resume({ resumeSessionId }) { return createCapturedHandle(resumeSessionId); }
+  };
+  const subagents = options.noSubagents ? undefined : {
+    async listDescendants(id) {
+      calls.subagentList.push(id);
+      if (options.subagentListError) throw new Error("injected subagent list failure");
+      return clone(options.subagentDescendants ?? []);
+    },
+    rootOf(agent) {
+      calls.subagentRoot.push(agent);
+      return options.subagentRoot ?? agent;
+    },
+    capacityOf(agent) {
+      calls.subagentCapacity.push(agent);
+      return options.subagentCapacity ?? { running: 0, limit: 10 };
+    },
+    async drainDescendants(parents) {
+      calls.subagentDrain.push(parents.map(agent => agent.id));
+      calls.lifecycle.push(`drain:${parents.map(agent => agent.id).join(",")}`);
+      if (options.subagentDrainError) throw new Error("injected subagent drain failure");
+      if (typeof options.afterSubagentDrain === "function") await options.afterSubagentDrain(parents, fixture);
+    }
+  };
+
   const routes = [];
   const disposers = [];
+  const listeners = new Map();
   const services = {
     dshHomePath: sub => sub === "sessions" ? (options.sessionsRoot ?? fixture.sessionsRoot) : join(fixture.home, sub),
     workspaceRegistry,
@@ -329,7 +387,9 @@ function makeHost(fixture, options = {}) {
     agents,
     jobs,
     terminals,
-    sessionPersistence
+    sessionPersistence,
+    agentLoop,
+    subagents
   };
   const ctx = {
     logger: { info() {}, warn() {}, error() {} },
@@ -339,7 +399,16 @@ function makeHost(fixture, options = {}) {
       if (typeof disposer === "function") disposers.push(disposer);
       return disposer;
     },
-    emit(name, payload) { calls.events.push({ name, payload }); },
+    on(name, fn) {
+      const list = listeners.get(name) ?? new Set();
+      list.add(fn);
+      listeners.set(name, list);
+      return () => list.delete(fn);
+    },
+    emit(name, payload) {
+      calls.events.push({ name, payload });
+      for (const fn of [...(listeners.get(name) ?? [])]) fn(payload);
+    },
     webServer: {
       register(route) {
         routes.push(route);
@@ -358,6 +427,7 @@ function makeHost(fixture, options = {}) {
     globalState,
     liveAgents,
     liveSessions,
+    agentLoop,
     dispose() { for (const disposer of disposers.reverse()) disposer(); }
   };
 }
@@ -378,6 +448,10 @@ function addLiveSession(host, id = SID, header = makeHeader(id)) {
   const session = { id, header };
   host.liveSessions.set(id, session);
   return session;
+}
+
+function openCapturedSession(host, id = SID) {
+  return host.agentLoop.resume({ resumeSessionId: id });
 }
 
 async function call(host, method, path, body) {
@@ -488,6 +562,191 @@ try {
     assertNoProblems(problems);
   }));
 
+  await test("强制删除通过官方 AgentHandle 关闭 live 会话后进入回收站", () => scenario({}, async (fixture, host) => {
+    const handle = await openCapturedSession(host);
+    assert.equal(handle.agent, host.liveAgents.get(SID));
+    const ordinary = await call(host, "POST", "/trash", { sessionId: SID });
+    assert.equal(ordinary.status, 409);
+    assert.equal(ordinary.body.code, "session-active");
+    assert.equal(ordinary.body.forceAvailable, true, "有官方 root 句柄时应允许 force 确认");
+    assert.equal(host.calls.forceDispose.length, 0, "普通删除不应销毁 live Agent");
+    const forced = await call(host, "POST", "/trash", { sessionId: SID, force: true });
+    assert.equal(forced.status, 200, `force trash 应成功，实际 ${forced.status}: ${JSON.stringify(forced.body)}`);
+    assert.equal(forced.body.result.trashed, true);
+    assert.deepEqual(host.calls.forceDispose, [SID]);
+    assert.deepEqual(host.calls.subagentList, [SID, SID], "应在 drain 前后各读取一次官方子代理目录");
+    assert.deepEqual(host.calls.subagentDrain, [[SID]], "应先 drain 根子代理树");
+    assert.deepEqual(host.calls.cacheWrite, [SID], "关闭后应等待根会话缓存检查点");
+    assert.deepEqual(host.calls.lifecycle, [`drain:${SID}`, `dispose:${SID}`, `cache:${SID}`], "生命周期顺序应为 drain → dispose → cache checkpoint");
+    assert.equal(host.liveAgents.has(SID), false);
+    assert.equal(host.liveSessions.has(SID), false);
+    assert.equal(existsSync(sessionDir(fixture, SID)), false);
+    assert.equal(existsSync(itemPath(fixture, SID)), true);
+    assert.equal(existsSync(metaPath(fixture, SID)), true);
+  }));
+
+  await test("自然关闭事件会释放已捕获句柄，旧句柄不能用于强制删除", () => scenario({}, async (fixture, host) => {
+    const handle = await openCapturedSession(host);
+    host.ctx.emit("agent/disposed", { agent: handle.agent });
+    const response = await call(host, "POST", "/trash", { sessionId: SID, force: true });
+    const problems = await rejectedWithoutMutationProblems(fixture, host, response, "live-handle-unavailable");
+    expectCondition(problems, host.calls.forceDispose.length === 0, "自然关闭后不得复用旧句柄");
+    expectCondition(problems, host.calls.subagentDrain.length === 0, "旧句柄预检失败时不应 drain");
+    assertNoProblems(problems);
+  }));
+
+  await test("drain 后才物化的官方子代理会一并进入回收站", () => scenario({
+    subagentDescendants: [{ kind: "child", id: CHILD, parentId: SID, depth: 1, mode: "continuable", activity: "inactive", hasChildren: false }],
+    afterSubagentDrain: async (_parents, fixture) => {
+      await fixture.createSession(CHILD, makeHeader(CHILD, { parentSession: SID, origin: "subagent", delegationDepth: 1 }));
+    }
+  }, async (fixture, host) => {
+    await openCapturedSession(host);
+    const response = await call(host, "POST", "/trash", { sessionId: SID, force: true });
+    assert.equal(response.status, 200, `force tree trash 应成功，实际 ${response.status}: ${JSON.stringify(response.body)}`);
+    assert.equal(existsSync(join(itemPath(fixture, SID), ".children", CHILD)), true, "drain 后物化的子代理应进入父项 .children");
+    assert.equal(existsSync(sessionDir(fixture, CHILD)), false);
+  }));
+
+  await test("官方子代理深度超过 32 层时拒绝", () => scenario({
+    subagentDescendants: [{ kind: "child", id: CHILD, parentId: SID, depth: 33, mode: "continuable", activity: "inactive", hasChildren: false }]
+  }, async (fixture, host) => {
+    await openCapturedSession(host);
+    const response = await call(host, "POST", "/trash", { sessionId: SID, force: true });
+    const problems = await rejectedWithoutMutationProblems(fixture, host, response, "descendant-depth-exceeded");
+    expectCondition(problems, host.calls.subagentDrain.length === 0, "超深目录不应 drain");
+    assertNoProblems(problems);
+  }));
+
+  await test("磁盘与官方目录父链冲突时拒绝", () => scenario({
+    subagentDescendants: [{ kind: "child", id: CHILD, parentId: "other-parent", depth: 1, mode: "continuable", activity: "inactive", hasChildren: false }]
+  }, async (fixture, host) => {
+    await fixture.createSession(CHILD, makeHeader(CHILD, { parentSession: SID, origin: "subagent", delegationDepth: 1 }));
+    await openCapturedSession(host);
+    const response = await call(host, "POST", "/trash", { sessionId: SID, force: true });
+    const problems = await rejectedWithoutMutationProblems(fixture, host, response, "descendant-discovery-failed");
+    expectCondition(problems, host.calls.subagentDrain.length === 0, "父链冲突时不应 drain");
+    expectCondition(problems, host.calls.forceDispose.length === 0, "父链冲突时不应 dispose");
+    assertNoProblems(problems);
+  }));
+
+  await test("官方子代理目录 diagnostic 时拒绝，且不 drain 不 dispose", () => scenario({
+    subagentDescendants: [{ kind: "diagnostic", id: CHILD, reason: "corrupt" }]
+  }, async (fixture, host) => {
+    await openCapturedSession(host);
+    const response = await call(host, "POST", "/trash", { sessionId: SID, force: true });
+    const problems = await rejectedWithoutMutationProblems(fixture, host, response, "descendant-discovery-failed");
+    expectCondition(problems, host.calls.subagentDrain.length === 0, "diagnostic 时不应 drain");
+    expectCondition(problems, host.calls.forceDispose.length === 0, "diagnostic 时不应 dispose root");
+    assertNoProblems(problems);
+  }));
+
+  await test("drain 后官方目录仍报 running 时拒绝", () => scenario({
+    subagentDescendants: [{ kind: "child", id: CHILD, parentId: SID, depth: 1, mode: "external", activity: "running", hasChildren: false }]
+  }, async (fixture, host) => {
+    await openCapturedSession(host);
+    const response = await call(host, "POST", "/trash", { sessionId: SID, force: true });
+    const problems = await rejectedWithoutMutationProblems(fixture, host, response, "subagent-drain-failed");
+    expectCondition(problems, host.calls.forceDispose.length === 0, "official running 残留时不应 dispose root");
+    assertNoProblems(problems);
+  }));
+
+  await test("drain 后 capacity 非零时拒绝", () => scenario({
+    subagentCapacity: { running: 1, limit: 10 }
+  }, async (fixture, host) => {
+    await openCapturedSession(host);
+    const response = await call(host, "POST", "/trash", { sessionId: SID, force: true });
+    const problems = await rejectedWithoutMutationProblems(fixture, host, response, "subagent-drain-failed");
+    expectCondition(problems, host.calls.forceDispose.length === 0, "capacity 非零时不应 dispose root");
+    assertNoProblems(problems);
+  }));
+
+  await test("非 root 子代理强制删除拒绝，不提升到树根", () => scenario({
+    subagentRoot: { id: "other-root" }
+  }, async (fixture, host) => {
+    await openCapturedSession(host);
+    const response = await call(host, "POST", "/trash", { sessionId: SID, force: true });
+    const problems = await rejectedWithoutMutationProblems(fixture, host, response, "subagent-nonroot-unsupported");
+    expectCondition(problems, host.calls.subagentDrain.length === 0, "非 root 不应调用 drain");
+    expectCondition(problems, host.calls.forceDispose.length === 0, "非 root 不应 dispose target");
+    assertNoProblems(problems);
+  }));
+
+  await test("缺少官方子代理服务时拒绝，且不 dispose", () => scenario({ noSubagents: true }, async (fixture, host) => {
+    await openCapturedSession(host);
+    const response = await call(host, "POST", "/trash", { sessionId: SID, force: true });
+    const problems = await rejectedWithoutMutationProblems(fixture, host, response, "subagent-drain-unavailable");
+    expectCondition(problems, host.calls.forceDispose.length === 0, "缺少子代理服务时不应 dispose");
+    assertNoProblems(problems);
+  }));
+
+  await test("普通 fork 的 parentSession 不会把独立 live 会话纳入强制删除", () => scenario({}, async (fixture, host) => {
+    await openCapturedSession(host);
+    const forkId = "session-independent-fork";
+    const forkSession = { id: forkId, header: makeHeader(forkId, { parentSession: SID, origin: undefined }) };
+    host.liveAgents.set(forkId, { id: forkId, session: forkSession });
+    host.liveSessions.set(forkId, forkSession);
+    const response = await call(host, "POST", "/trash", { sessionId: SID, force: true });
+    assert.equal(response.status, 200, `独立 fork 不应阻止根会话删除，实际 ${response.status}: ${JSON.stringify(response.body)}`);
+    assert.equal(host.liveAgents.has(forkId), true, "独立 fork 应保持 live");
+    assert.equal(host.calls.cacheWrite.includes(forkId), false, "不应 checkpoint 无关 fork");
+  }));
+
+  await test("后端不支持时强制删除在 drain/dispose 前拒绝", () => scenario({
+    snapshot: (_id, fixture) => ({ header: makeHeader(SID), location: { kind: "sqlite", path: artifactPath(fixture, SID) } })
+  }, async (fixture, host) => {
+    await openCapturedSession(host);
+    const response = await call(host, "POST", "/trash", { sessionId: SID, force: true });
+    const problems = await rejectedWithoutMutationProblems(fixture, host, response, "unsupported-backend");
+    expectCondition(problems, host.calls.subagentDrain.length === 0, "后端拒绝时不应 drain");
+    expectCondition(problems, host.calls.forceDispose.length === 0, "后端拒绝时不应 dispose");
+    assertNoProblems(problems);
+  }));
+
+  await test("缺少缓存检查点能力时在 drain/dispose 前拒绝", () => scenario({ noCacheWrite: true }, async (fixture, host) => {
+    await openCapturedSession(host);
+    const response = await call(host, "POST", "/trash", { sessionId: SID, force: true });
+    const problems = await rejectedWithoutMutationProblems(fixture, host, response, "cache-checkpoint-unavailable");
+    expectCondition(problems, host.calls.subagentDrain.length === 0, "缓存能力缺失时不应 drain");
+    expectCondition(problems, host.calls.forceDispose.length === 0, "缓存能力缺失时不应 dispose");
+    assertNoProblems(problems);
+  }));
+
+  await test("没有官方句柄时强制删除拒绝，且不移动文件", () => scenario({}, async (fixture, host) => {
+    addLiveAgent(host);
+    addLiveSession(host);
+    const response = await call(host, "POST", "/trash", { sessionId: SID, force: true });
+    const problems = await rejectedWithoutMutationProblems(fixture, host, response, "live-handle-unavailable");
+    expectCondition(problems, host.calls.forceDispose.length === 0, "缺少句柄时不应调用销毁");
+    expectCondition(problems, host.calls.subagentDrain.length === 0, "缺少 root 句柄时不应 drain 子代理");
+    assertNoProblems(problems);
+  }));
+
+  await test("官方 dispose 拒绝时强制删除失败，且不移动文件", () => scenario({ forceDisposeError: true }, async (fixture, host) => {
+    await openCapturedSession(host);
+    const response = await call(host, "POST", "/trash", { sessionId: SID, force: true });
+    const problems = await rejectedWithoutMutationProblems(fixture, host, response, "force-dispose-failed");
+    expectCondition(problems, host.calls.forceDispose.length === 1, "应调用一次官方 dispose");
+    assertNoProblems(problems);
+  }));
+
+  await test("官方 dispose 后仍 live 时拒绝，且不移动文件", () => scenario({ forceDisposeStillLive: true }, async (fixture, host) => {
+    await openCapturedSession(host);
+    const response = await call(host, "POST", "/trash", { sessionId: SID, force: true });
+    const problems = await rejectedWithoutMutationProblems(fixture, host, response, "lifecycle-check-failed");
+    assertNoProblems(problems);
+  }));
+
+  await test("强制关闭后仍有活动 job 时拒绝，且不移动文件", () => scenario({
+    jobs: [{ id: "job-force-active", kind: "bash", label: "强制删除后仍活动", owner: SID, status: "running", startedAt: 1, output: { total: 0, earliest: 0 } }]
+  }, async (fixture, host) => {
+    await openCapturedSession(host);
+    const response = await call(host, "POST", "/trash", { sessionId: SID, force: true });
+    const problems = await rejectedWithoutMutationProblems(fixture, host, response, "session-active");
+    expectCondition(problems, host.calls.forceDispose.length === 1, "应先调用官方 dispose");
+    assertNoProblems(problems);
+  }));
+
   for (const status of ["running", "stopping"]) {
     await test(`jobs.list 返回 ${status}：409 session-active 且无副作用`, () => scenario({
       jobs: [{ id: "job-safety-active", kind: "bash", label: "安全回归任务", owner: SID, status, startedAt: 1, output: { total: 0, earliest: 0 } }]
@@ -515,9 +774,10 @@ try {
   await test("terminals.hasOwnerActivity=true：409 session-active 且无副作用", () => scenario({
     terminalActivity: true
   }, async (fixture, host) => {
+    const agent = addLiveAgent(host);
     const response = await call(host, "POST", "/trash", { sessionId: SID });
     const problems = await rejectedWithoutMutationProblems(fixture, host, response, "session-active");
-    expectCondition(problems, JSON.stringify(host.calls.terminalsHasOwnerActivity) === JSON.stringify([SID]), "未调用 terminals.hasOwnerActivity(sessionId)");
+    expectCondition(problems, host.calls.terminalsHasOwnerActivity.length === 1 && host.calls.terminalsHasOwnerActivity[0] === agent, "terminals.hasOwnerActivity 必须收到精确 Agent 对象");
     expectCondition(problems, host.calls.persistenceStat.length === 0, "活动终端门禁后仍读取持久化后端");
     expectCondition(problems, host.calls.scheduleEdit.length === 0, "活动终端门禁后仍修改定时任务");
     assertNoProblems(problems);

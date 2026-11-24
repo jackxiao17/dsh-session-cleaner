@@ -4,7 +4,7 @@
 
 A DSH (DeepSeek Harness) desktop plugin that puts a **"DSH Session Cleaner"** into the app: every session's `···` menu gets a red **Delete** item (currently before "Archive") that moves the session into a recycle bin, and the sidebar footer gets a **Session Recycle Bin** entry with search, restore and permanent deletion.
 
-Version 0.8.0 is safety-first: it handles only **cold sessions**. A live Agent, a Session that has not shut down cleanly, SQLite, or a custom storage root is refused explicitly instead of being half-disposed or falsely reported as deleted. For a supported cold session, deletion cleans the workspace accounting slot, pin, archive flag and projection-cache row (including `.bak` copies), together with its cold subagent tree. Restore puts those back, including the original sidebar position. Active schedules are paused on delete and re-enabled on restore; only permanent delete removes them.
+Version 0.8.1 keeps the safety-first policy: ordinary deletion handles only **cold sessions**. If DSH still keeps a session open or in recent views, the plugin shows an explicit warning and, after confirmation, closes it through DSH's official `AgentHandle.dispose()` before moving it to the recycle bin. SQLite, unknown backends and custom storage roots are still refused. Deletion cleans the workspace accounting slot, pin, archive flag and projection-cache row (including `.bak` copies), together with its subagent tree. Restore puts those back, including the original sidebar position. Active schedules are paused on delete and re-enabled on restore; only permanent delete removes them.
 
 ## Screenshots
 
@@ -40,9 +40,9 @@ Grab the latest archive from the [Releases page](https://github.com/jackxiao17/d
 
 ## Compatibility
 
-- **0.8.0 requires DeepSeek Harness `>=0.2.3-alpha.2 <0.3.0`**. The current real-machine verified version is `0.2.3-alpha.2`; this release fixes live lifecycle handling, reversible schedules, storage-backend detection and sidebar button layout.
-- **Supported:** cold sessions on the default JSONL Session backend and default sessions root; projection caches use the default JSON storage layout. Cold subagent trees are handled together.
-- **Fail-closed:** a live Agent, a Session that has not shut down cleanly, or an active background job returns `409`; SQLite, an unknown Session backend, or a custom sessions root is refused too.
+- **0.8.1 requires DeepSeek Harness `>=0.2.3-alpha.2 <0.3.0`**. The target verification version is `0.2.3-alpha.2`; this release adds confirmed force deletion for open or recently viewed sessions.
+- **Supported:** the default JSONL Session backend and default sessions root; projection caches use the default JSON storage layout. Subagent trees are handled together.
+- **Fail-closed:** ordinary deletion asks for confirmation when a session is live. Force deletion returns `409` if an active job or terminal remains, or if no official disposal handle is available. SQLite, an unknown Session backend, or a custom sessions root is refused too.
 - **Node.js:** `^24.22.3 || >=26.13.1`, matching DSH `0.2.3-alpha.2`.
 - **Verification status:** automated commands are listed below; real-machine platforms, coverage and results are recorded in the corresponding release notes.
 - **DSH `0.2.2` and earlier are not supported; `0.3.0` and later are not declared yet.** After a major DSH upgrade, upgrade the plugin first if the menu disappears or an action reports an error; recycle-bin data remains under `~/.dsh/dsh-session-cleaner/trash/`.
@@ -50,7 +50,7 @@ Grab the latest archive from the [Releases page](https://github.com/jackxiao17/d
 ## Usage
 
 1. Session `···` → **Delete**: a cold session moves straight into the recycle bin, with a “✓ session moved to the recycle bin” toast.
-2. Live sessions are refused safely: if a live Agent or a Session that has not shut down cleanly is still present, the plugin returns `409` with the reason instead of cancelling half a turn and moving the log anyway.
+2. Open/recently viewed sessions: ordinary deletion shows a second warning. After “Force delete” is confirmed, the plugin stops and closes the session through DSH's official handle before moving it to the bin. This may interrupt the current answer. If no official handle was captured, the plugin asks you to fully restart DSH and retry; config-driven Agents do not support force deletion.
 3. **Session recycle bin** (sidebar footer button):
    - Search: the title filters live; tick "search body" to match your questions and the assistant's replies
    - Workspace filter, sorting by deletion time / title / size / turns (both directions)
@@ -74,9 +74,11 @@ Grab the latest archive from the [Releases page](https://github.com/jackxiao17/d
 
 ## Known limits
 
-- DSH's plugin interfaces carry no official stability promise. When a host contract is unsupported, 0.8.0 fails closed instead of degrading and continuing to delete.
+- DSH's plugin interfaces carry no official stability promise. When a host contract is unsupported, 0.8.1 fails closed instead of degrading to private teardown.
 - The bin occupies disk space (the panel shows the total) and is capped by the 30-day retention.
-- **Cold sessions only:** a live Agent, a Session that has not shut down cleanly, an active background job, an active terminal, or an active subagent tree returns `409`. This avoids bypassing the host's complete lifecycle and losing closing events.
+- **Live sessions require confirmation:** ordinary deletion never tears down a live Agent directly. Force deletion requires an official `AgentHandle`, closes children before parents, then re-checks jobs and terminals. A missing handle, timeout or still-live registry refuses to move files.
+- **Subagent safety gate:** official catalogs and `drainDescendants` are used; a still-running catalog or nonzero capacity refuses deletion. Non-root subagents are not force-deleted directly, avoiding damage to siblings in the same tree.
+- **Config-driven Agent limit:** Agents created directly by DSH configuration do not pass through the capturable official handle factory, so force deletion is unavailable. Ordinary cold-session deletion is unaffected.
 - **Default JSONL + default sessions root only:** SQLite, an unknown backend or a custom sessions root returns `409` instead of creating a “successful” bin entry while the real log stays untouched. Custom storage routes are outside the supported scope.
 - **Schedule reversibility:** active tasks are paused on delete and restored on restore. A one-shot task whose execution time has already passed may not recover its original timing semantics; the UI reports that explicitly. Permanent delete removes tasks for good.
 - **Restore is not guaranteed to be byte-identical:** archived sessions still return to the archive; if the original anchor was deleted, the session returns to the top of the sidebar and the result says so.
@@ -136,18 +138,29 @@ From the repository root:
 npm test
 ```
 
-Or run the two maintainer scripts separately (they do not take part in the runtime and are not packed into the release):
+Or run the maintainer scripts separately (they do not take part in the runtime and are not packed into the release):
 
 ```powershell
 node scripts/verify.mjs
 node scripts/verify-safety.mjs
+node scripts/verify-force-delete.mjs
 node scripts/verify-client-layout.mjs
 node scripts/verify-client-behavior.mjs
 ```
 
-`verify.mjs` covers the core delete/restore/cache/locking/reconciliation/retention paths and Client registrations. `verify-safety.mjs` covers live-session refusal, backend detection, schedule pause/restore, interrupted-restore recovery and event contracts. `verify-client-layout.mjs` locks the sidebar footer layout. `verify-client-behavior.mjs` locks per-item failure feedback for permanent delete and empty-bin operations. Release only after all four pass.
+`verify.mjs` covers core delete/restore/cache/locking/reconciliation/retention paths and Client registrations. `verify-safety.mjs` covers live sessions, backends, schedules and interrupted-restore safety. `verify-force-delete.mjs` locks official-handle capture and forced teardown boundaries. `verify-client-layout.mjs` locks the sidebar footer layout. `verify-client-behavior.mjs` locks permanent-delete feedback and force-delete confirmation. Release only after all five pass.
 
 ## Changelog
+
+### 0.8.1 (force delete open/recently viewed sessions)
+
+- **Fixed existing sessions that could not be deleted:** the current session and sessions left in recent views remain live in DSH. Ordinary deletion now shows an explicit warning; after confirmation it closes the session through official `AgentHandle.dispose()` before moving it to the bin.
+- **No safety downgrade:** missing handles, identity mismatch, disposal timeout, disposal rejection or a still-live registry all refuse to move files and report a specific error.
+- **Child-before-parent processing:** force deletion preflights the whole subagent tree; if any live member lacks an official handle, nothing is torn down. A live root uses official `drainDescendants`, and a still-running catalog or nonzero capacity refuses deletion.
+- **Deterministic cache checkpoint:** family Sessions are checkpointed through the official projection-cache write after disposal and before the snapshot is read, avoiding stale cache data on restore.
+- **Added a confirmation overlay:** it reuses the active theme and `shell.overlay`, disables buttons while busy, and prevents duplicate submission.
+- **Expanded regressions:** official-handle capture, disposal order, timeout, rejection, still-live state, active jobs and Client confirmation are covered; all 360 checks pass.
+- **Real-machine force-delete verification passed:** on Windows Desktop + DSH `0.2.3-alpha.2`, a real JSONL v4/zstd session was opened, left in recent views, force-deleted to the bin and restored to the sidebar. Log and cache SHA256 values matched byte-for-byte, and the bin snapshot/directory were cleaned correctly.
 
 ### 0.8.0 (DSH 0.2.3-alpha.2 + safety-first)
 

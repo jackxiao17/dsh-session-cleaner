@@ -29,7 +29,7 @@
 
 优点：使用官方销毁能力，顺序完整，能释放 JSONL 写锁，不依赖私有 Map 结构。
 
-限制：只能捕获插件包装安装后创建的 Agent。插件热重载前已经存在的 Agent 没有句柄，必须完整重启 DSH 后重试。
+限制：只能捕获插件包装安装后通过 `createAgent`/`resume` 创建的 Agent。插件热重载前已经存在的 Agent，以及 DSH 配置驱动、直接走 `AgentLoop.create()` 的 Agent 没有句柄；前者完整重启后可重试，后者明确提示暂不支持强制删除。
 
 ### 方案 B：移植 0.7.9 私有拆除（不采用）
 
@@ -65,6 +65,18 @@
 4. 强制销毁成功后，从映射删除该句柄；失败时保留映射供重试。
 5. 普通删除不读取或修改句柄映射。
 
+### 官方子代理与缓存加固
+
+- 强制删除先预检 root 官方句柄、后端/路径、已发现家族成员的缓存检查点能力，再开始任何拆除。
+- 使用 `subagents.listDescendants()` 读取官方目录；diagnostic、父链冲突或深度超过 32 时拒绝。
+- 家族发现采用三类并集：磁盘后代、官方目录 child 行、`agents.list()`/`sessions.list()` 中 `origin === 'subagent'` 的 live 成员；普通 fork 的 `parentSession` 不参与级联。
+- live root 必须先 `await subagents.drainDescendants([root])`，再重新读取官方目录并要求没有 `activity: 'running'`，同时要求 `capacityOf(root).running === 0`。
+- 非 root 子代理不提升到树根 drain，直接拒绝，以免误停祖先和兄弟。
+- drain 后重新扫描磁盘，纳入刚物化的子代理；external/未落盘 ID 只在存在 live registry 成员或磁盘目录时参与拆除/捕获。
+- 销毁前保存家族 Session 对象，销毁后逐个 `await sessionProjectionCache.write(session)`，避免 detach 的 fire-and-forget 检查点晚于快照读取。drain 期间刚物化且未进入 live registry 的子代理使用宿主 detach 检查点；缓存是派生数据，日志与元数据安全不依赖它。
+- `terminals.hasOwnerActivity()` 只接受精确 Agent 对象；cold 后没有 Agent 时不做字符串查询。
+- `session-active` 响应带 `forceAvailable`；只有存在可用官方 root 句柄时才弹出强制删除确认。
+
 ### Client
 
 1. `performTrash(sessionId, t, { force=false })` 首次普通删除。
@@ -84,6 +96,10 @@
 - `live-handle-unavailable`：live 会话没有身份匹配的官方销毁句柄。
 - `lifecycle-check-failed`：销毁超时、销毁异常或销毁后 registry 仍报告 live。
 - `force-dispose-failed`：官方 `dispose()` 拒绝，保留原始错误信息。
+- `subagent-drain-unavailable` / `subagent-drain-failed`：官方子代理接口缺失、drain 失败、官方目录仍 running 或 capacity 非零。
+- `subagent-nonroot-unsupported`：目标是非根子代理，不能安全提升到树根。
+- `descendant-discovery-failed`：官方目录 diagnostic、格式异常或父链来源冲突。
+- `cache-checkpoint-unavailable` / `cache-checkpoint-failed`：无法在拆除前证明缓存检查点能力，或拆除后检查点失败。
 - 所有错误均发生在文件移动之前；不创建回收站快照。
 
 ## 测试策略
@@ -96,7 +112,12 @@
 - 缺少句柄、句柄身份不匹配、dispose 超时、dispose 拒绝、销毁后仍 live 均拒绝且不移动文件。
 - 销毁后仍有 running/stopping job 或 terminal 时拒绝且不移动文件。
 - 子代理预检缺少任一官方句柄时，不销毁父会话也不移动文件。
-- 包装安装前创建的 Agent 不进入映射；插件卸载恢复包装且不销毁 Agent。
+- 包装安装前创建的 Agent 不进入映射；插件卸载恢复包装且不销毁 Agent；外层包装存在时停用捕获而不摘除别人的包装。
+- `agent/disposed` / `session/disposed` 按精确身份释放自然关闭的句柄。
+- dispose/drain 超时后的重试复用同一 in-flight Promise，不重复拆除。
+- 官方目录 diagnostic、running、capacity 非零、超深、父链冲突、非 root、缺少服务均在拆除前拒绝。
+- 普通 fork 不因 `parentSession` 被级联；无关 live 会话不写入缓存检查点。
+- 后端、路径和缓存能力预检发生在 drain/dispose 前。
 - 现有恢复崩溃、部分恢复、purge 反馈与布局测试全部保持通过。
 
 ### Client 回归
@@ -119,6 +140,8 @@
 6. 再次彻底删除，验证无残留；
 7. 当前正在运行的会话仅在明确警告后测试，确认能够停止并删除；
 8. 测试数据全部清理，用户现有会话与回收站数据不动。
+
+真机结果（2026-11-24）：Windows Desktop + DSH 0.2.3-alpha.2，对可丢弃的真实 JSONL v4/zstd 会话完成普通删除二次确认、强制关闭、移入回收站和恢复；日志与缓存 SHA256 与删除前一致，侧栏显示正常，回收站快照和目录清理正确。
 
 ## 版本与发布
 

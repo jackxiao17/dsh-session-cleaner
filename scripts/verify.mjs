@@ -787,10 +787,10 @@ console.log("\n[9] 客户端 bundle（slot 注册与语言包）");
   }
   ok(registrations.every(r => r.items.every(i => i && i.spec && i.spec.id)), "每个注册项都有 id");
   const overlayCount = registrations.find(r => r.name === "shell.overlay")?.items.length ?? 0;
-  eq(overlayCount, 2, "shell.overlay 注册了 toast 与回收站面板两个");
+  eq(overlayCount, 3, "shell.overlay 注册了 toast、强制删除确认与回收站面板");
   eq(dictionaries.length, 1, "注册了一份语言包");
   const zh = dictionaries[0].dicts.zh, en = dictionaries[0].dicts.en;
-  for (const key of ["trash.restored", "trash.restoredArchived", "trash.restoredMixed", "trash.purged", "trash.partialFailure", "trash.failureInvalid", "trash.failureEmpty", "trash.failureUnknown", "trash.failureNotDeleted", "toast.trashed", "toast.sessionActive", "toast.backendUnsupported", "menu.delete"]) {
+  for (const key of ["trash.restored", "trash.restoredArchived", "trash.restoredMixed", "trash.purged", "trash.partialFailure", "trash.failureInvalid", "trash.failureEmpty", "trash.failureUnknown", "trash.failureNotDeleted", "toast.trashed", "toast.sessionActive", "toast.liveHandleUnavailable", "toast.backendUnsupported", "force.title", "force.message", "force.confirm", "force.busy", "menu.delete"]) {
     ok(typeof zh[key] === "string" && zh[key] !== "", `中文语言包有 ${key}`);
     ok(typeof en[key] === "string" && en[key] !== "", `英文语言包有 ${key}`);
   }
@@ -798,7 +798,7 @@ console.log("\n[9] 客户端 bundle（slot 注册与语言包）");
   ok(effects.some(l => String(l).includes("styles")), "注入了样式 effect");
 }
 
-// ───────────────────────── 9b. 0.8.0 / 0.2.3 适配项 ─────────────────────────
+// ───────────────────────── 9b. 0.8.1 / 0.2.3 适配项 ─────────────────────────
 
 console.log("\n[9b] 浮层拖拽区与旧格式工件");
 {
@@ -813,7 +813,7 @@ console.log("\n[9b] 浮层拖拽区与旧格式工件");
   }
   const clientSource = await readFile(join(ROOT, "lib", "client.js"), "utf8");
   const layers = [...clientSource.matchAll(/className: "scl-layer"/g)];
-  eq(layers.length, 3, "三个全屏浮层都还在");
+  eq(layers.length, 4, "四个全屏浮层都还在");
   for (const [index, match] of layers.entries()) {
     const nearby = clientSource.slice(match.index, match.index + 400);
     ok(nearby.includes('"data-window-drag-exclude"'), `第 ${index + 1} 个浮层声明了 data-window-drag-exclude`);
