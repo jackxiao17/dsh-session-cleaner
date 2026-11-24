@@ -97,6 +97,8 @@ Copy-Item -LiteralPath (Join-Path $repoRoot 'lib\index.js')  -Destination (Join-
 # 图标与本地化：插件页的图标 / 标题 / 描述依赖它们，必须随发行包一起分发
 Copy-Item -LiteralPath (Join-Path $repoRoot 'icon.svg') -Destination $stageRoot -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot 'locale')   -Destination $stageRoot -Recurse -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot 'assets')   -Destination $stageRoot -Recurse -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot 'screenshots.json') -Destination $stageRoot -Force
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 Compress-Archive -Path $stageRoot -DestinationPath $zipPath -CompressionLevel Optimal
 $sha = (Get-FileHash $zipPath -Algorithm SHA256).Hash

@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Session Cleaner",
-    "description": "One-click move sessions to a recoverable recycle bin from the sidebar ··· menu — with search, restore, and permanent delete; also cleans pins, archive flags, caches, sub-agent trees, and scheduled tasks.",
+    "description": "Move cold sessions to a recoverable recycle bin with search, restore, and permanent delete; active schedules pause and resume, while live sessions, active jobs, SQLite, and custom sessions roots are safely refused.",
     "detail": "locale/detail.en.md"
   }
 }

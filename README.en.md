@@ -2,15 +2,15 @@
 
 **[简体中文](README.md) | English**
 
-A DSH (DeepSeek Harness) desktop plugin that puts a **"DSH Session Cleaner"** into the app: every session's `···` menu gets a red **Delete** item (below "Archive") that moves the session into a recycle bin, and the sidebar footer gets a **Session Recycle Bin** entry with search, restore and permanent deletion.
+A DSH (DeepSeek Harness) desktop plugin that puts a **"DSH Session Cleaner"** into the app: every session's `···` menu gets a red **Delete** item (currently before "Archive") that moves the session into a recycle bin, and the sidebar footer gets a **Session Recycle Bin** entry with search, restore and permanent deletion.
 
-Deleting a session is not just moving its log directory: every trace it left in DSH is handled too — the workspace accounting slot, its pin, its archive flag, and the projection-cache row (including the host's `.bak` copies). **A session with subagents moves as a whole tree**: the host cascades agent disposal only, so a child session's log directory, accounting and cache row would otherwise survive the parent. Restoring puts each of those back, **including the session's original position in the sidebar**. Permanently deleting a binned session also clears the schedules bound to it and removes its project directory once it is empty.
+Version 0.8.0 is safety-first: it handles only **cold sessions**. A live Agent, a Session that has not shut down cleanly, SQLite, or a custom storage root is refused explicitly instead of being half-disposed or falsely reported as deleted. For a supported cold session, deletion cleans the workspace accounting slot, pin, archive flag and projection-cache row (including `.bak` copies), together with its cold subagent tree. Restore puts those back, including the original sidebar position. Active schedules are paused on delete and re-enabled on restore; only permanent delete removes them.
 
 ## Screenshots
 
 ![A red Delete item added to the session ··· menu](assets/menu-delete.jpg)
 
-A red **Delete** appears in the session `···` menu (below "Archive").
+A red **Delete** appears in the session `···` menu (currently before "Archive").
 
 ![Session recycle bin panel: title and full-text search, workspace filter, sorting, restore and permanent delete](assets/recycle-bin.jpg)
 
@@ -40,23 +40,24 @@ Grab the latest archive from the [Releases page](https://github.com/jackxiao17/d
 
 ## Compatibility
 
-- **Re-verified on DeepSeek Harness `0.2.2-rc.5`** (desktop build, the `dsh web` web profile): the upgrade items between `0.2.2-rc.2` and `0.2.2-rc.5` walked item by item (only the `v0.2.2-rc.3` / `v0.2.2-rc.4` guides exist in between, neither touching anything this plugin depends on) plus a full host-source cross-check and live probes (`/session-cleaner/api/health` and `/trash/list` both return 200); the earlier live pass (delete, restore, the recycle bin and the chat-log viewer) ran on `0.2.1-rc.3`, and the full regression (subagent cascade plus a whole-`~/.dsh` residue scan) on `0.2.1-rc.2`
-- Every host contract it relies on was checked against the `0.2.2-rc.5` source: session log format v4 and its zstd frame layout, the `session_projcache` storage domain v7, the `workspaceRegistry` / `schedule` / `storageDomain` / `webServer` services, the client slots plus `__ModuleLoader__`, and the macOS window drag regions — nothing incompatible
-- **Backward compatibility is not verified, so it is not promised.** What can be said is how it fails: every host API call is guarded by an existence check and falls back to the equivalent file-level path, so on an older build the worst case is **less functionality** (for example the slot cannot be restored, so the session returns to the top of the sidebar — reported honestly), never deleting the wrong thing or leaving invisible garbage
-- `0.1.x` is untested: that line went through v0→v4 format migrations and large API changes, so it is not recommended
-- If a major DSH upgrade breaks the plugin, the symptom is a missing menu item/button or an error on an action — session data is never harmed. Binned data stays under `~/.dsh/dsh-session-cleaner/trash/` and can be moved back by hand to `sessions/<proj>/<id>/`
+- **0.8.0 targets DeepSeek Harness `0.2.3-alpha.2`**, with fixes for live lifecycle handling, reversible schedules and storage-backend detection.
+- **Supported:** cold sessions on the default JSONL Session backend and default sessions root; projection caches use the default JSON storage layout. Cold subagent trees are handled together.
+- **Fail-closed:** a live Agent, a Session that has not shut down cleanly, or an active background job returns `409`; SQLite, an unknown Session backend, or a custom sessions root is refused too.
+- **Node.js:** `^24.22.3 || >=26.13.1`, matching DSH `0.2.3-alpha.2`.
+- **Verification status:** automated commands are listed below; real-machine platforms, coverage and results are recorded in the corresponding release notes.
+- Earlier DSH versions are not individually verified and are not promised. After a major DSH upgrade, upgrade the plugin first if the menu disappears or an action reports an error; recycle-bin data remains under `~/.dsh/dsh-session-cleaner/trash/`.
 
 ## Usage
 
-1. Session `···` → **Delete**: moves straight into the recycle bin, with a "✓ session moved to the recycle bin" toast (no confirm dialog — it is recoverable)
-2. A session with a running turn can be deleted too: the current turn is ended first (turn cancelled, agent disposed), then the session is moved
+1. Session `···` → **Delete**: a cold session moves straight into the recycle bin, with a “✓ session moved to the recycle bin” toast.
+2. Live sessions are refused safely: if a live Agent or a Session that has not shut down cleanly is still present, the plugin returns `409` with the reason instead of cancelling half a turn and moving the log anyway.
 3. **Session recycle bin** (sidebar footer button):
    - Search: the title filters live; tick "search body" to match your questions and the assistant's replies
    - Workspace filter, sorting by deletion time / title / size / turns (both directions)
    - Select items, then **Restore selected / Delete selected forever** (with confirmation), or empty the whole bin
-4. **View chat log**: each session's "view chat log" opens the per-turn questions with the assistant's replies (Markdown rendered, long replies elided in the middle, body keywords still searchable)
-5. Restore: the directory moves back, the workspace accounting is re-attached **at its original slot**, the projection-cache row is restored verbatim, and the pin and archive flag come back (a session that was archived returns to the archive — the toast says where it went)
-6. The bin keeps items for **30 days**: it is purged once at startup and then every **6 hours** (so a long-running DSH does not skip it); the panel shows the next purge time
+4. **View chat log**: each session's “view chat log” opens the per-turn questions with the assistant's replies (Markdown rendered, long replies elided in the middle, body keywords still searchable).
+5. Restore: the directory moves back, the workspace accounting is re-attached **at its original slot**, the projection-cache row and pin/archive state come back, and schedules paused at delete time are re-enabled.
+6. The bin keeps items for **30 days**: it is purged once at startup and then every **6 hours**; the panel shows the next purge time.
 
 ## What each step touches
 
@@ -67,21 +68,22 @@ Grab the latest archive from the [Releases page](https://github.com/jackxiao17/d
 | Global archive set `archivedSessionIds` | removed (whether it was archived is recorded) | restored as it was | — |
 | Global pin set `pinnedSessionIds` | removed (its rank is recorded) | restored at its rank | — |
 | Projection-cache row `storages/session_projcache/sessions/<id>.json` | removed through the host storage domain, snapshot kept verbatim | written back (file + host memory table) | re-checked, plus `<id>.json.bak.*` |
-| Schedules bound to the session (`schedule` domain) | **left alone**: snapshotted for display | nothing to restore (never touched) | removed (active + already-ended rows) |
+| Schedules bound to the session (`schedule` domain) | active tasks paused, history retained | tasks that were active at delete time are re-enabled | removed (active, paused and ended rows) |
 | Its subagents (`origin: subagent` + `parentSession` pointing at it) | moved into the bin item's `.children/`, each with its own snapshot | restored with it (directory / slot / cache row / pin / archive) | removed with it (cache row + schedules + emptied project dir) |
 | `<dshHome>/sessions/<proj>/` project directory | — | recreated when needed | removed once empty |
 
 ## Known limits
 
-- DSH's plugin interfaces carry no official stability promise; a major upgrade can break the plugin — the symptom is a missing menu item/button or an error on an action, never damage to session data
-- The bin occupies disk space (the panel shows the total) and is capped by the 30-day retention
-- **Schedules are not removed while a session sits in the bin**: for a reminder whose session is gone the host only logs a warning — it does not recreate the session and does not retry. Use "delete forever" to clear them. The reason for the split is that the host's `schedule` service **cannot recreate a task faithfully** (a new task gets a new id and an empty delivery history), so deleting at bin time would make a reversible step irreversible
-- **Restore is not guaranteed to be byte-identical to the moment before deletion**: an archived session returns into the archive (it does not jump into the sidebar), and if its anchor session has been deleted it stays at the top of the sidebar (the panel reports "position not restored" honestly)
-- **Two log directories for the same id are refused**: that is a corrupt layout the host itself refuses to resolve, so the plugin lists the paths for you to handle by hand instead of deleting one copy, leaving the other, and reporting success
-- **Crash safety**: the snapshot is written before the files move and upgraded to its final state afterwards; startup runs a two-way reconciliation — a leftover "never moved" snapshot is rolled back (with subagents this is all-or-nothing: if any member is still at home, the ones already moved go back), and a bin directory without a snapshot is adopted as a "data incomplete" entry (visible and permanently deletable, but not restorable, because its original path is unknowable)
-- **0.7.0 removed two HTTP endpoints nobody called**: `POST /delete` (physical delete without the bin) and `POST /status`. Deletion now has a single path: move to the bin → delete forever
-- Verified on the local desktop build (the `dsh web` web profile) only, on DeepSeek Harness `0.2.2-rc.5`; no other deployment shape was tested
-- **Windows has not been tested on a real machine**: the plugin only uses cross-platform `node:fs` / `node:path` APIs and has no macOS-only calls; the `data-platform=darwin` glass styling applies on macOS only, while Windows uses the default tokens. Session directories and the bin live under the same `dshHome`, so `rename` never crosses volumes; if the host still holds a log handle, the action fails with an error instead of deleting anything. On first use on Windows, run one disposable session through delete → restore before relying on it
+- DSH's plugin interfaces carry no official stability promise. When a host contract is unsupported, 0.8.0 fails closed instead of degrading and continuing to delete.
+- The bin occupies disk space (the panel shows the total) and is capped by the 30-day retention.
+- **Cold sessions only:** a live Agent, a Session that has not shut down cleanly, an active background job, an active terminal, or an active subagent tree returns `409`. This avoids bypassing the host's complete lifecycle and losing closing events.
+- **Default JSONL + default sessions root only:** SQLite, an unknown backend or a custom sessions root returns `409` instead of creating a “successful” bin entry while the real log stays untouched. Custom storage routes are outside the supported scope.
+- **Schedule reversibility:** active tasks are paused on delete and restored on restore. A one-shot task whose execution time has already passed may not recover its original timing semantics; the UI reports that explicitly. Permanent delete removes tasks for good.
+- **Restore is not guaranteed to be byte-identical:** archived sessions still return to the archive; if the original anchor was deleted, the session returns to the top of the sidebar and the result says so.
+- **Two log directories for the same id are refused:** paths are listed so one copy is not deleted while another survives behind a success result.
+- **Crash safety:** the snapshot is written before the move; startup reconciles both halves, rolls an incomplete move back all-or-nothing, and adopts orphan directories as “data incomplete” entries.
+- **0.7.0 removed two HTTP endpoints nobody called:** `POST /delete` and `POST /status`. Deletion now has one path: move to the bin → delete forever.
+- The implementation uses cross-platform `node:fs` / `node:path` APIs; real-machine platforms and results are recorded in the release notes.
 
 ## Uninstall / rollback
 
@@ -107,7 +109,7 @@ Key points:
 
 ### One-command release script
 
-`scripts/release.ps1` is a maintainer tool (it does not take part in the plugin's runtime and is not packed into the release — `package.json`'s `files` lists `lib`, `cordis.patch.yml` and the READMEs). It does these steps in order:
+`scripts/release.ps1` is a maintainer tool (it does not take part in the plugin's runtime and is not packed into the release). `package.json`'s `files` includes `lib`, `cordis.patch.yml`, `icon.svg`, `locale`, `assets`, `screenshots.json` and both READMEs. It does these steps in order:
 
 1. Verify that `package.json#version` and `lib/index.js#buildId` agree (it aborts otherwise, to prevent the "log shows the old version" problem again)
 2. Build `dsh-session-cleaner-<version>.zip` and print its SHA256
@@ -128,15 +130,32 @@ Flags: `-SkipGit`, `-SkipSync`, `-SkipAbout`, `-SkipRelease` skip individual ste
 
 ### Run the verification harness before releasing
 
-`scripts/verify.mjs` is a maintainer tool (it does not take part in the runtime and is not packed into the release). Using a mock host plus real temporary directories, it actually exercises the key paths: path validation, move-to-bin, restore (slot / pin / archive / cache-row restoration), permanent delete (schedules and emptied directories), concurrency locking, duplicate-directory refusal, startup reconciliation, retention purging, real DSH log frame parsing, plus the client bundle's slot registrations and zh/en dictionary parity.
+From the repository root:
 
 ```powershell
-node scripts\verify.mjs
+npm test
 ```
 
-Release only when it ends with `N 通过 / 0 失败` (N passed / 0 failed).
+Or run the two maintainer scripts separately (they do not take part in the runtime and are not packed into the release):
+
+```powershell
+node scripts/verify.mjs
+node scripts/verify-safety.mjs
+```
+
+`verify.mjs` covers the core delete/restore/cache/locking/reconciliation/retention paths and Client registrations. `verify-safety.mjs` covers live-session refusal, backend detection, schedule pause/restore and event contracts. Release only after both pass.
 
 ## Changelog
+
+### 0.8.0 (DSH 0.2.3-alpha.2 + safety-first)
+
+- **Cold sessions only:** a live Agent, a Session that has not shut down cleanly, or an active subagent tree returns `409`; `scope.dispose + store.delete` is no longer used to bypass the host lifecycle.
+- **Fail-closed storage backends:** only the default JSONL backend and default storage root are supported; SQLite, unknown backends and custom roots are refused instead of producing false success.
+- **Reversible schedules:** active tasks are paused on delete and re-enabled on restore; only permanent delete removes them.
+- **Stronger events and validation:** cold sessions no longer emit a fabricated `session/disposed`; v4 headers, subagent `origin`, path identity and depth checks are tightened.
+- **Menu and docs aligned:** Delete currently appears before Archive; the Node requirement is now `^24.22.3 || >=26.13.1`.
+- **Verification upgraded:** `scripts/verify-safety.mjs` adds the safety regression suite, and `npm test` runs both suites.
+- **Real-machine verification passed:** Windows Desktop + DSH `0.2.3-alpha.2`; a dedicated JSONL v4/zstd cold session completed delete → restore → delete again → permanent delete, log and cache hashes matched byte-for-byte, a live session was safely refused with `409` and no side effects, and all test data was removed.
 
 ### 0.7.9 (DSH 0.2.2-rc.5 adaptation + three data-safety fixes)
 

@@ -21,26 +21,43 @@ const eq = (actual, expected, label) => ok(actual === expected, label, `期望 $
 
 const SID = "session-11111111-2222-3333-4444-555555555555";
 const ANCHOR = "session-99999999-8888-7777-6666-555555555555";
-const PROJ = "F--work-demo--";
-const OTHER = "F--other--";
+const PROJ = "--F-work-demo--";
+const OTHER = "--F-other--";
 
 // DSH 0.2.2-rc.1 起定时任务的归属写在 target.sessionId，顶层不再带 sessionId；
 // 更早写入的行仍可能只有顶层 sessionId，插件两种情况都要认。
 const ownedBy = (entry, sessionId) => entry?.target?.sessionId === sessionId || entry?.sessionId === sessionId;
 
+const v4Header = (id, cwd = "F:\\work\\demo", extra = {}) => ({
+  type: "session",
+  version: 4,
+  id,
+  createdAt: 1,
+  cwd,
+  isSeeded: false,
+  delegationDepth: 0,
+  ...extra
+});
+
+async function writeV4Session(home, project, id, header, rows = [{ type: "turn/start", time: 2 }]) {
+  const dir = join(home, "sessions", project, id);
+  await mkdir(dir, { recursive: true });
+  const content = [header, ...rows].map(row => JSON.stringify(row)).join("\n") + "\n";
+  await writeFile(join(dir, "session.v4.jsonl"), content);
+  return { dir, artifact: join(dir, "session.v4.jsonl"), content, header };
+}
+
 async function makeHome() {
   const home = await mkdtemp(join(tmpdir(), "dsh-verify-"));
-  await mkdir(join(home, "sessions", PROJ, SID), { recursive: true });
-  await mkdir(join(home, "sessions", PROJ, ANCHOR), { recursive: true });
   await mkdir(join(home, "storages", "session_projcache", "sessions"), { recursive: true });
-  const header = JSON.stringify({ type: "session", id: SID, cwd: "F:\\work\\demo", createdAt: 1 }) + "\n";
-  const events = header
-    + JSON.stringify({ type: "turn/start", time: 2 }) + "\n"
-    + JSON.stringify({ type: "user/message", time: 3, data: { source: { kind: "user" }, content: "帮我看看室分方案" } }) + "\n"
-    + JSON.stringify({ type: "assistant/message", time: 4, data: { message: { content: [{ type: "text", text: "好的" }], source: { model: "deepseek-flash" } } } }) + "\n";
-  await writeFile(join(home, "sessions", PROJ, SID, "session.jsonl"), events);
-  await writeFile(join(home, "sessions", PROJ, ANCHOR, "session.jsonl"),
-    JSON.stringify({ type: "session", id: ANCHOR, cwd: "F:\\work\\demo", createdAt: 1 }) + "\n");
+  const events = [
+    v4Header(SID),
+    { type: "turn/start", time: 2 },
+    { type: "user/message", time: 3, data: { source: { kind: "user" }, content: "帮我看看室分方案" } },
+    { type: "assistant/message", time: 4, data: { message: { content: [{ type: "text", text: "好的" }], source: { model: "deepseek-flash" } } } }
+  ];
+  await writeV4Session(home, PROJ, SID, events[0], events.slice(1));
+  await writeV4Session(home, PROJ, ANCHOR, v4Header(ANCHOR));
   const row = JSON.stringify({ version: 7, record: { identity: { formatVersion: 4, createdAt: 1, cwd: "F:\\work\\demo", isSeeded: false }, rows: { title: { ver: 1, seq: 3, val: "室分方案" } } } });
   await writeFile(join(home, "storages", "session_projcache", "sessions", `${SID}.json`), row);
   await writeFile(join(home, "storages", "session_projcache", "sessions", `${SID}.json.bak.202601011200`), row);
@@ -98,12 +115,12 @@ function makeHost(home, opts = {}) {
   const storageDomain = opts.noStorageDomain ? undefined : { get: (name) => (name === "session_projcache" ? { table: () => domainTable } : undefined) };
 
   const schedules = [
-    // 0.2.2-rc.1 形状：归属在 target.sessionId，顶层没有 sessionId
-    { id: "schedule-aaaa", target: { kind: "session", sessionId: SID }, involvedSessionIds: [SID], status: "active", kind: "at", title: "提醒", prompt: "p", scheduledAt: "2099-01-01T00:00:00.000Z" },
-    { id: "schedule-bbbb", target: { kind: "session", sessionId: SID }, involvedSessionIds: [SID], status: "inactive", kind: "at", title: "旧提醒", prompt: "p", scheduledAt: "2020-01-01T00:00:00.000Z" },
+    // 0.2.3 状态：active / paused / ended；更新操作必须保留任务行。
+    { id: "schedule-aaaa", target: { kind: "session", sessionId: SID }, involvedSessionIds: [SID], status: "active", kind: "at", title: "提醒", prompt: "p", scheduledAt: "2099-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+    { id: "schedule-bbbb", target: { kind: "session", sessionId: SID }, involvedSessionIds: [SID], status: "ended", kind: "at", title: "旧提醒", prompt: "p", scheduledAt: "2020-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:01.000Z" },
     // 老格式行：只有顶层 sessionId，宿主仍会读入，插件必须照样认
-    { id: "schedule-legacy", sessionId: SID, status: "inactive", kind: "at", title: "上古提醒", prompt: "p", scheduledAt: "2019-01-01T00:00:00.000Z" },
-    { id: "schedule-cccc", target: { kind: "session", sessionId: "other-session" }, involvedSessionIds: ["other-session"], status: "active", kind: "at", title: "别人的", prompt: "p", scheduledAt: "2099-01-01T00:00:00.000Z" }
+    { id: "schedule-legacy", sessionId: SID, status: "ended", kind: "at", title: "上古提醒", prompt: "p", scheduledAt: "2019-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:02.000Z" },
+    { id: "schedule-cccc", target: { kind: "session", sessionId: "other-session" }, involvedSessionIds: ["other-session"], status: "active", kind: "at", title: "别人的", prompt: "p", scheduledAt: "2099-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:03.000Z" }
   ];
   const removeRow = (id) => {
     const i = schedules.findIndex(s => s.id === id);
@@ -137,14 +154,56 @@ function makeHost(home, opts = {}) {
         }
       }
       : {
-        // 0.2.2-rc.1：删单条只剩 edit({id, action:"delete"})
+        // 0.2.3：edit 同时负责暂停/恢复与彻底删除。
         async edit(request, actorSessionId) {
-          if (request.action !== "delete") throw new Error("verify: 只实现了 delete");
-          call.scheduleEdit.push([actorSessionId, request.id]);
-          if (!removeRow(request.id)) return { id: request.id, code: "schedule_not_found" };
-          return { id: request.id, deleted: true };
+          call.scheduleEdit.push([actorSessionId, request.id, request.action, request.patch]);
+          const row = schedules.find(s => s.id === request.id);
+          if (!row) return { id: request.id, code: "schedule_not_found" };
+          if (request.action === "delete") {
+            removeRow(request.id);
+            return { id: request.id, deleted: true };
+          }
+          if (request.action !== "update") throw new Error("verify: 不支持的 schedule action");
+          if (request.expectedUpdatedAt !== undefined && request.expectedUpdatedAt !== row.updatedAt) {
+            return { id: request.id, code: "schedule_conflict" };
+          }
+          Object.assign(row, request.patch ?? {});
+          if (request.patch?.active === false) row.status = "paused";
+          else if (request.patch?.active === true) row.status = "active";
+          delete row.active;
+          row.updatedAt = new Date(Date.parse(row.updatedAt ?? "2026-01-01T00:00:00.000Z") + 1000).toISOString();
+          return { ...row };
         }
       })
+  };
+
+  const sessionPersistence = opts.noPersistence ? undefined : {
+    async stat(id) {
+      if (typeof opts.persistenceStat === "function") return opts.persistenceStat(id, home);
+      const root = join(home, "sessions");
+      let projects;
+      try { projects = await readdir(root, { withFileTypes: true }); }
+      catch (error) { if (error.code === "ENOENT") return undefined; throw error; }
+      for (const project of projects) {
+        if (!project.isDirectory() || project.isSymbolicLink()) continue;
+        for (const segment of [mod.encodeSessionSegment(id), id]) {
+          const dir = join(root, project.name, segment);
+          for (const filename of mod.ARTIFACT_NAMES) {
+            const artifact = join(dir, filename);
+            if (!existsSync(artifact)) continue;
+            const header = await mod.readSessionHeader(artifact);
+            if (header.id !== id) continue;
+            return {
+              header,
+              formatStatus: "current",
+              revision: `verify-${id}-${filename}`,
+              location: { kind: "jsonl", path: artifact }
+            };
+          }
+        }
+      }
+      return undefined;
+    }
   };
 
   const routes = [];
@@ -154,7 +213,8 @@ function makeHost(home, opts = {}) {
     dshHomePath: (sub) => join(home, sub),
     workspaceRegistry: registry,
     storageDomain,
-    schedule: opts.noSchedule ? undefined : schedule
+    schedule: opts.noSchedule ? undefined : schedule,
+    sessionPersistence
   };
   const ctx = {
     logger: { info: (m) => log.infos.push(String(m)), warn: (m) => log.warnings.push(String(m)), error: (m) => log.warnings.push(String(m)) },
@@ -231,7 +291,7 @@ console.log("\n[2] 移入回收站 / 恢复");
   ok(existsSync(itemDir), "回收站里出现会话目录");
   ok(!existsSync(join(home, "sessions", PROJ, SID)), "原目录已消失");
   const meta = JSON.parse(await readFile(join(home, "dsh-session-cleaner", "trash", "meta", `${SID}.json`), "utf8"));
-  eq(meta.version, 3, "meta 版本 3（带 descendants 字段）");
+  eq(meta.version, 4, "meta 版本 4（带后端与定时任务暂停快照）");
   eq(meta.stage, "trashed", "meta stage=trashed");
   eq(meta.filesMoved, true, "meta filesMoved=true");
   eq(meta.workspaceAnchorId, ANCHOR, "记下恢复锚点（原后继会话）");
@@ -243,8 +303,10 @@ console.log("\n[2] 移入回收站 / 恢复");
   const listedItem = listed.body.result.items.find(i => i.id === SID);
   ok(listedItem !== undefined && listedItem.projcacheRow === undefined, "列表响应不携带投影缓存行原文（只回展示字段）");
   eq(meta.schedules.length, 3, "快照里抄录了该会话的 3 条定时任务（新格式 + 老格式）");
-  eq(trashed.body.result.schedulesStopped, 1, "移入回收站当场停掉进行中的那 1 条任务");
-  eq(trashed.body.result.schedulesKept, 2, "响应回报只剩 2 条历史行（进行中的那条已停）");
+  eq(trashed.body.result.schedulesPaused, 1, "移入回收站暂停进行中的那 1 条任务");
+  eq(trashed.body.result.schedulesKept, 3, "暂停不删除任务，3 条记录全部保留");
+  eq(host.call.stopSessionTasks, 0, "不再调用 stopSessionTasks");
+  eq(host.schedules.find(s => s.id === "schedule-aaaa")?.status, "paused", "活动任务状态变为 paused");
   eq(trashed.body.result.cacheRemoved, true, "投影缓存行已删");
   eq(trashed.body.result.cacheBackupsRemoved, 1, "投影缓存备份文件已删");
   ok(!existsSync(join(home, "storages", "session_projcache", "sessions", `${SID}.json`)), "缓存行文件不在了");
@@ -252,8 +314,8 @@ console.log("\n[2] 移入回收站 / 恢复");
   ok(host.projRows.get(SID) === "deleted-by-domain", "走的是宿主存储域的表删除");
   eq(host.slots.join(","), [ANCHOR + "-prev", ANCHOR].join(","), "记账槽位已摘掉");
   eq(host.global.pinnedSessionIds.length, 0, "置顶已清");
-  eq(host.schedules.filter(s => ownedBy(s, SID)).length, 2,
-    "进行中任务已停、历史行留在盘上（彻底删除时才清）");
+  eq(host.schedules.filter(s => ownedBy(s, SID)).length, 3,
+    "暂停任务与历史行全部留在盘上（彻底删除时才清）");
 
   const restored = await call(host, "POST", "/trash/restore", { sessionId: SID });
   eq(restored.status, 200, "POST /trash/restore 返回 200");
@@ -267,6 +329,8 @@ console.log("\n[2] 移入回收站 / 恢复");
   eq(host.call.insertSessionBefore[0].join(","), `${SID},${ANCHOR}`, "用锚点插回原位（不是简单前插）");
   eq(host.slots.join(","), [ANCHOR + "-prev", SID, ANCHOR].join(","), "槽位顺序与删除前一致");
   eq(restored.body.result.pinRestored, true, "置顶已还原");
+  eq(restored.body.result.schedulesResumed, 1, "恢复时重新激活插件暂停的 1 条任务");
+  eq(host.schedules.find(s => s.id === "schedule-aaaa")?.status, "active", "恢复后定时任务回到 active");
   ok(host.global.pinnedSessionIds.includes(SID), "置顶集合里有它");
   eq(host.global.archivedSessionIds.length, 0, "归档集合未被误加");
   ok(!existsSync(join(home, "dsh-session-cleaner", "trash", "meta", `${SID}.json`)), "快照已删除");
@@ -280,9 +344,7 @@ console.log("\n[3] 彻底删除（含定时任务与空工程目录）");
   const { home } = await makeHome();
   // 单独一个只放着 SID2 的工程目录，用来验证"删空了就连目录一起删"
   const SID2 = "session-solo-0000";
-  await mkdir(join(home, "sessions", OTHER, SID2), { recursive: true });
-  await writeFile(join(home, "sessions", OTHER, SID2, "session.jsonl"),
-    JSON.stringify({ type: "session", id: SID2, cwd: "F:\\other", createdAt: 1 }) + "\n");
+  await writeV4Session(home, OTHER, SID2, v4Header(SID2, "F:\\other"));
   const host = makeHost(home);
   mod.apply(host.ctx);
   await call(host, "POST", "/trash", { sessionId: SID });
@@ -293,10 +355,11 @@ console.log("\n[3] 彻底删除（含定时任务与空工程目录）");
   eq(purged.body.result.results[0].deleted, true, "该条已彻底删除");
   ok(!existsSync(join(home, "dsh-session-cleaner", "trash", "items", SID)), "回收站目录已删");
   ok(!existsSync(join(home, "dsh-session-cleaner", "trash", "meta", `${SID}.json`)), "快照已删");
-  ok(host.call.stopSessionTasks >= 1, "调用了宿主的 stopSessionTasks");
-  ok(host.call.scheduleEdit.length >= 1, "0.2.2-rc.1 的历史行用 edit({id,action:'delete'}) 删掉");
+  eq(host.call.stopSessionTasks, 0, "全程不调用 stopSessionTasks");
+  ok(host.call.scheduleEdit.some(([, , action]) => action === "update"), "暂停使用 edit({action:'update'})");
+  ok(host.call.scheduleEdit.some(([, , action]) => action === "delete"), "彻底删除使用 edit({action:'delete'})");
   ok(host.call.scheduleEdit.every(([actor]) => actor === undefined),
-    "edit(delete) 不传伪造的 actorSessionId（0.7.9：宿主只把这一参当通知归属用）");
+    "edit 不传伪造的 actorSessionId（宿主只把这一参当通知归属用）");
   eq(host.call.scheduleDelete.length, 0, "不再依赖 0.2.2-rc.1 已移除的 schedule.delete");
   ok(host.schedules.every(s => !ownedBy(s, SID)), "该会话的定时任务（含已结束的历史行）都没了");
   ok(host.schedules.some(s => ownedBy(s, "other-session")), "别的会话的定时任务没被误删");
@@ -306,19 +369,19 @@ console.log("\n[3] 彻底删除（含定时任务与空工程目录）");
   await rm(home, { recursive: true, force: true });
 }
 
-// ───────────────────────── 3b. 旧宿主的 schedule.delete 回落 ─────────────────────────
+// ───────────────────────── 3b. 无法暂停任务时 fail closed ─────────────────────────
 
-console.log("\n[3b] 旧宿主（没有 edit()）回落 schedule.delete");
+console.log("\n[3b] 旧宿主（没有 edit()）拒绝进入回收站");
 {
   const { home } = await makeHome();
   const host = makeHost(home, { legacyScheduleApi: true });
   mod.apply(host.ctx);
-  await call(host, "POST", "/trash", { sessionId: SID });
-  const purged = await call(host, "POST", "/trash/delete", { sessionIds: [SID] });
-  eq(purged.status, 200, "POST /trash/delete 返回 200");
-  ok(host.call.scheduleDelete.length >= 1, "走了旧的 schedule.delete");
-  ok(host.schedules.every(s => !ownedBy(s, SID)), "旧宿主上该会话的定时任务也清干净了");
-  ok(host.schedules.some(s => ownedBy(s, "other-session")), "别人的任务仍然保留");
+  const trashed = await call(host, "POST", "/trash", { sessionId: SID });
+  eq(trashed.status, 409, "无法暂停活动任务时 POST /trash 返回 409");
+  eq(trashed.body.code, "schedule-unsupported", "错误码 schedule-unsupported");
+  ok(existsSync(join(home, "sessions", PROJ, SID)), "拒绝时原会话目录仍在");
+  ok(host.schedules.some(s => ownedBy(s, SID)), "拒绝时没有删除任何定时任务");
+  eq(host.call.scheduleDelete.length, 0, "不再依赖旧 schedule.delete");
   await rm(home, { recursive: true, force: true });
 }
 
@@ -364,17 +427,16 @@ console.log("\n[4b] 子会话（subagent）随父会话一起走");
   const CHILD2 = "session-child-0002";
   const GRAND = "session-grand-0003";
   const { home, row } = await makeHome();
-  const mk = async (id, parent) => {
-    await mkdir(join(home, "sessions", PROJ, id), { recursive: true });
-    const header = { type: "session", id, cwd: "F:\\work\\demo", createdAt: 1, isSeeded: false, delegationDepth: parent ? 1 : 0 };
-    if (parent) { header.parentSession = parent; header.origin = "subagent"; }
-    await writeFile(join(home, "sessions", PROJ, id, "session.jsonl"),
-      JSON.stringify(header) + "\n" + JSON.stringify({ type: "turn/start", time: 2 }) + "\n");
+  const mk = async (id, parent, depth = 1) => {
+    const header = v4Header(id, "F:\\work\\demo", parent
+      ? { parentSession: parent, origin: "subagent", delegationDepth: depth }
+      : {});
+    await writeV4Session(home, PROJ, id, header);
     await writeFile(join(home, "storages", "session_projcache", "sessions", `${id}.json`), row);
   };
   await mk(CHILD1, SID);
   await mk(CHILD2, SID);
-  await mk(GRAND, CHILD1);
+  await mk(GRAND, CHILD1, 2);
   // 另一个不相干父会话的子会话，绝不能被带进来
   await mk("session-stranger-0004", "session-someone-else");
 
@@ -406,14 +468,13 @@ console.log("\n[4b] 子会话（subagent）随父会话一起走");
   // 彻底删除：父 + 后代一起没，缓存行/定时任务/工程目录都收尾
   const h5 = await makeHome();
   // 子会话单独造（父会话已由 makeHome 建好）
-  const mkChild = async (id, parent) => {
-    await mkdir(join(h5.home, "sessions", PROJ, id), { recursive: true });
-    await writeFile(join(h5.home, "sessions", PROJ, id, "session.jsonl"),
-      JSON.stringify({ type: "session", id, cwd: "F:\\work\\demo", createdAt: 1, isSeeded: false, delegationDepth: 1, parentSession: parent, origin: "subagent" }) + "\n");
+  const mkChild = async (id, parent, depth = 1) => {
+    await writeV4Session(h5.home, PROJ, id,
+      v4Header(id, "F:\\work\\demo", { parentSession: parent, origin: "subagent", delegationDepth: depth }));
     await writeFile(join(h5.home, "storages", "session_projcache", "sessions", `${id}.json`), row);
   };
   await mkChild(CHILD1, SID);
-  await mkChild(GRAND, CHILD1);
+  await mkChild(GRAND, CHILD1, 2);
   const host5 = makeHost(h5.home);
   mod.apply(host5.ctx);
   await call(host5, "POST", "/trash", { sessionId: SID });
@@ -434,9 +495,8 @@ console.log("\n[4b] 子会话（subagent）随父会话一起走");
   // 对账必须"全有或全无"——把已搬走的父会话搬回原位，而不是留半棵在回收站里。
   const h6 = await makeHome();
   const mkChild6 = async (id, parent) => {
-    await mkdir(join(h6.home, "sessions", PROJ, id), { recursive: true });
-    await writeFile(join(h6.home, "sessions", PROJ, id, "session.jsonl"),
-      JSON.stringify({ type: "session", id, cwd: "F:\\work\\demo", createdAt: 1, isSeeded: false, delegationDepth: 1, parentSession: parent, origin: "subagent" }) + "\n");
+    await writeV4Session(h6.home, PROJ, id,
+      v4Header(id, "F:\\work\\demo", { parentSession: parent, origin: "subagent", delegationDepth: 1 }));
     await writeFile(join(h6.home, "storages", "session_projcache", "sessions", `${id}.json`), row);
   };
   await mkChild6(CHILD1, SID);
@@ -449,7 +509,7 @@ console.log("\n[4b] 子会话（subagent）随父会话一起走");
   await mkdir(binMeta, { recursive: true });
   await rename(join(h6.home, "sessions", PROJ, SID), join(binItems, SID));
   await writeFile(join(binMeta, `${SID}.json`), JSON.stringify({
-    version: 3, id: SID, stage: "prepared", filesMoved: false,
+    version: 4, id: SID, stage: "prepared", filesMoved: false,
     originalDir: join(h6.home, "sessions", PROJ, SID), deletedAt: Date.now(), bytes: 10,
     descendants: [{ id: CHILD1, originalDir: join(h6.home, "sessions", PROJ, CHILD1), projcacheRow: row }]
   }));
@@ -503,9 +563,7 @@ console.log("\n[5] 边界与错误路径");
 {
   // 重复目录
   const { home } = await makeHome();
-  await mkdir(join(home, "sessions", OTHER, SID), { recursive: true });
-  await writeFile(join(home, "sessions", OTHER, SID, "session.jsonl"),
-    JSON.stringify({ type: "session", id: SID, cwd: "F:\\other", createdAt: 1 }) + "\n");
+  await writeV4Session(home, OTHER, SID, v4Header(SID, "F:\\other"));
   const host = makeHost(home);
   mod.apply(host.ctx);
   const dup = await call(host, "POST", "/trash", { sessionId: SID });
@@ -528,8 +586,8 @@ console.log("\n[5] 边界与错误路径");
   const host3 = makeHost(h3.home);
   mod.apply(host3.ctx);
   const ghost = await call(host3, "POST", "/trash", { sessionId: "session-nonexistent" });
-  eq(ghost.status, 200, "磁盘上没有的会话：走“没有磁盘文件”的路径");
-  eq(ghost.body.result.filesMoved, false, "没有文件可搬");
+  eq(ghost.status, 404, "持久化中不存在的会话 → 404");
+  eq(ghost.body.code, "session-not-found", "错误码 session-not-found");
   const badId = await call(host3, "POST", "/trash", { sessionId: "../evil" });
   eq(badId.status, 400, "非法 sessionId → 400");
   const notFound = await call(host3, "POST", "/trash/restore", { sessionId: "session-never-trashed" });
@@ -552,13 +610,11 @@ console.log("\n[6] 启动对账（崩溃窗口）");
   const ORPHAN = "session-orphan-0000";
   const PREPARED = "session-prepared-0000";
   await mkdir(join(trashItems, ORPHAN), { recursive: true });
-  await writeFile(join(trashItems, ORPHAN, "session.jsonl"), "{}\n");
+  await writeFile(join(trashItems, ORPHAN, "session.v4.jsonl"), JSON.stringify(v4Header(ORPHAN)) + "\n");
   await mkdir(trashMeta, { recursive: true });
   await writeFile(join(trashMeta, `${ORPHAN}.1234abcd.tmp`), "{}");
   // 崩溃窗口：快照写了 stage=prepared，但文件还没搬走（原目录仍在）
-  await mkdir(join(home, "sessions", PROJ, PREPARED), { recursive: true });
-  await writeFile(join(home, "sessions", PROJ, PREPARED, "session.jsonl"),
-    JSON.stringify({ type: "session", id: PREPARED, cwd: "F:\\work\\demo", createdAt: 1 }) + "\n");
+  await writeV4Session(home, PROJ, PREPARED, v4Header(PREPARED));
   await writeFile(join(trashMeta, `${PREPARED}.json`), JSON.stringify({
     version: 2, id: PREPARED, stage: "prepared", filesMoved: false,
     originalDir: join(home, "sessions", PROJ, PREPARED), deletedAt: Date.now(), bytes: 10
@@ -583,19 +639,12 @@ console.log("\n[6] 启动对账（崩溃窗口）");
   const purgeOrphan = await call(host, "POST", "/trash/delete", { sessionIds: [ORPHAN] });
   eq(purgeOrphan.body.result.results[0].deleted, true, "收编项可以彻底删除");
 
-  // 没有磁盘文件的"空会话"进了回收站，跨重启不能被对账当成假条目清掉
+  // 0.8.0 不再允许无持久化记录的“空会话”进入回收站。
   const GHOST = "session-ghost-0000";
-  await call(host, "POST", "/trash", { sessionId: GHOST });
-  const ghostHost = makeHost(home);
-  mod.apply(ghostHost.ctx);
-  await new Promise(r => setTimeout(r, 250));
-  const ghostMeta = await readFile(join(trashMeta, `${GHOST}.json`), "utf8").then(JSON.parse).catch(() => undefined);
-  ok(ghostMeta !== undefined, "无文件的回收项跨重启仍在（没被对账误清）");
-  eq(ghostMeta?.stage, "trashed", "它的 stage 仍是 trashed");
-  const ghostList = await call(ghostHost, "POST", "/trash/list");
-  ok(ghostList.body.result.items.some(i => i.id === GHOST), "面板里仍可见");
-  const ghostRestore = await call(ghostHost, "POST", "/trash/restore", { sessionId: GHOST });
-  eq(ghostRestore.status, 200, "无文件项可以恢复（恢复记账与缓存记录）");
+  const missing = await call(host, "POST", "/trash", { sessionId: GHOST });
+  eq(missing.status, 404, "无持久化记录的会话 → 404");
+  eq(missing.body.code, "session-not-found", "错误码 session-not-found");
+  ok(!existsSync(join(trashMeta, `${GHOST}.json`)), "失败的删除不会留下回收站快照");
   await rm(home, { recursive: true, force: true });
 }
 
@@ -741,7 +790,7 @@ console.log("\n[9] 客户端 bundle（slot 注册与语言包）");
   eq(overlayCount, 2, "shell.overlay 注册了 toast 与回收站面板两个");
   eq(dictionaries.length, 1, "注册了一份语言包");
   const zh = dictionaries[0].dicts.zh, en = dictionaries[0].dicts.en;
-  for (const key of ["trash.restored", "trash.restoredArchived", "trash.restoredMixed", "trash.purged", "toast.trashed", "menu.delete"]) {
+  for (const key of ["trash.restored", "trash.restoredArchived", "trash.restoredMixed", "trash.purged", "toast.trashed", "toast.sessionActive", "toast.backendUnsupported", "menu.delete"]) {
     ok(typeof zh[key] === "string" && zh[key] !== "", `中文语言包有 ${key}`);
     ok(typeof en[key] === "string" && en[key] !== "", `英文语言包有 ${key}`);
   }
@@ -749,7 +798,7 @@ console.log("\n[9] 客户端 bundle（slot 注册与语言包）");
   ok(effects.some(l => String(l).includes("styles")), "注入了样式 effect");
 }
 
-// ───────────────────────── 9b. 0.2.2-rc.2 适配项 ─────────────────────────
+// ───────────────────────── 9b. 0.8.0 / 0.2.3 适配项 ─────────────────────────
 
 console.log("\n[9b] 浮层拖拽区与旧格式工件");
 {
@@ -769,9 +818,12 @@ console.log("\n[9b] 浮层拖拽区与旧格式工件");
     const nearby = clientSource.slice(match.index, match.index + 400);
     ok(nearby.includes('"data-window-drag-exclude"'), `第 ${index + 1} 个浮层声明了 data-window-drag-exclude`);
   }
+  ok(/\.scl-footerSlot\{[^}]*width:auto/.test(clientSource), ".scl-footerSlot 使用 width:auto 自适应宽度");
   const manifest = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8"));
-  ok(typeof manifest.engines?.dsh === "string" && manifest.engines.dsh.includes("0.2.2-rc.2"),
-    "package.json 用 engines.dsh 声明兼容版本");
+  // DSH 的 semver 校验启用 includePrerelease:true，因此该范围接受 0.2.3-alpha.2，
+  // 同时保留对 0.2.2-rc.2 及更高 0.2.x 版本的兼容声明。
+  eq(manifest.engines?.dsh, ">=0.2.2-rc.2 <0.3.0",
+    "package.json 保留 includePrerelease 语义下的 0.2.x 兼容范围");
 }
 
 // ───────────────────────── 10. 截图声明与仓库一致性 ─────────────────────────
@@ -843,13 +895,11 @@ console.log("\n[11] prepared 中间态与损坏快照的保守处理");
   const host = makeHost(home);
   mod.apply(host.ctx);
   const PREPARED_ID = "session-prepared-7777";
-  await mkdir(join(home, "sessions", PROJ, PREPARED_ID), { recursive: true });
-  await writeFile(join(home, "sessions", PROJ, PREPARED_ID, "session.jsonl"),
-    JSON.stringify({ type: "session", id: PREPARED_ID, cwd: "F:\\work\\demo", createdAt: 1 }) + "\n");
+  await writeV4Session(home, PROJ, PREPARED_ID, v4Header(PREPARED_ID));
   await writeFile(join(home, "storages", "session_projcache", "sessions", `${PREPARED_ID}.json`), row);
   await mkdir(dirname(join(home, "dsh-session-cleaner", "trash", "meta", `${PREPARED_ID}.json`)), { recursive: true });
   await writeFile(join(home, "dsh-session-cleaner", "trash", "meta", `${PREPARED_ID}.json`), JSON.stringify({
-    version: 3, id: PREPARED_ID, stage: "prepared", filesMoved: false,
+    version: 4, id: PREPARED_ID, stage: "prepared", filesMoved: false,
     originalDir: join(home, "sessions", PROJ, PREPARED_ID),
     deletedAt: Date.now() - 40 * 24 * 60 * 60 * 1000, bytes: 10
   }));
@@ -882,11 +932,11 @@ console.log("\n[11] prepared 中间态与损坏快照的保守处理");
   const binMetaB = join(hb.home, "dsh-session-cleaner", "trash", "meta");
   await mkdir(join(binItemsB, B_ID, ".children"), { recursive: true });
   await mkdir(join(binItemsB, B_ID, ".children", BC_ID), { recursive: true });
-  await writeFile(join(binItemsB, B_ID, ".children", BC_ID, "session.jsonl"),
-    JSON.stringify({ type: "session", id: BC_ID, cwd: "F:\\work\\demo", createdAt: 1 }) + "\n");
+  await writeFile(join(binItemsB, B_ID, ".children", BC_ID, "session.v4.jsonl"),
+    JSON.stringify(v4Header(BC_ID)) + "\n");
   await mkdir(dirname(join(binMetaB, `${B_ID}.json`)), { recursive: true });
   await writeFile(join(binMetaB, `${B_ID}.json`), JSON.stringify({
-    version: 3, id: B_ID, stage: "prepared", filesMoved: true,
+    version: 4, id: B_ID, stage: "prepared", filesMoved: true,
     originalDir: join(hb.home, "sessions", PROJ, B_ID), bytes: 20,
     descendants: [{ id: BC_ID, originalDir: join(hb.home, "sessions", PROJ, BC_ID) }]
   }));
