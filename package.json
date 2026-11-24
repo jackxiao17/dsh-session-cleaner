@@ -43,7 +43,7 @@
     "README.en.md"
   ],
   "scripts": {
-    "test": "node scripts/verify.mjs && node scripts/verify-safety.mjs"
+    "test": "node scripts/verify.mjs && node scripts/verify-safety.mjs && node scripts/verify-client-layout.mjs"
   },
   "dsh": {
     "bundle": {

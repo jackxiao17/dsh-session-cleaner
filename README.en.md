@@ -40,7 +40,7 @@ Grab the latest archive from the [Releases page](https://github.com/jackxiao17/d
 
 ## Compatibility
 
-- **0.8.0 targets DeepSeek Harness `0.2.3-alpha.2`**, with fixes for live lifecycle handling, reversible schedules and storage-backend detection.
+- **0.8.0 targets DeepSeek Harness `0.2.3-alpha.2`**, with fixes for live lifecycle handling, reversible schedules, storage-backend detection and sidebar button layout.
 - **Supported:** cold sessions on the default JSONL Session backend and default sessions root; projection caches use the default JSON storage layout. Cold subagent trees are handled together.
 - **Fail-closed:** a live Agent, a Session that has not shut down cleanly, or an active background job returns `409`; SQLite, an unknown Session backend, or a custom sessions root is refused too.
 - **Node.js:** `^24.22.3 || >=26.13.1`, matching DSH `0.2.3-alpha.2`.
@@ -141,20 +141,25 @@ Or run the two maintainer scripts separately (they do not take part in the runti
 ```powershell
 node scripts/verify.mjs
 node scripts/verify-safety.mjs
+node scripts/verify-client-layout.mjs
 ```
 
-`verify.mjs` covers the core delete/restore/cache/locking/reconciliation/retention paths and Client registrations. `verify-safety.mjs` covers live-session refusal, backend detection, schedule pause/restore and event contracts. Release only after both pass.
+`verify.mjs` covers the core delete/restore/cache/locking/reconciliation/retention paths and Client registrations. `verify-safety.mjs` covers live-session refusal, backend detection, schedule pause/restore and event contracts. `verify-client-layout.mjs` locks the wide and collapsed sidebar footer layout. Release only after all three pass.
 
 ## Changelog
 
 ### 0.8.0 (DSH 0.2.3-alpha.2 + safety-first)
+
+- **Restored the full button width:** the recycle-bin slot now fills the remaining space in the host footer Flex row instead of shrinking to its label, while the theme toggle keeps its own seat.
+- **Kept the 36px rail footprint:** the collapsed sidebar still uses a fixed 36px icon slot and does not stretch with the wide layout.
+- **Added a layout regression test:** `npm test` now runs the core, safety and Client layout suites.
 
 - **Cold sessions only:** a live Agent, a Session that has not shut down cleanly, or an active subagent tree returns `409`; `scope.dispose + store.delete` is no longer used to bypass the host lifecycle.
 - **Fail-closed storage backends:** only the default JSONL backend and default storage root are supported; SQLite, unknown backends and custom roots are refused instead of producing false success.
 - **Reversible schedules:** active tasks are paused on delete and re-enabled on restore; only permanent delete removes them.
 - **Stronger events and validation:** cold sessions no longer emit a fabricated `session/disposed`; v4 headers, subagent `origin`, path identity and depth checks are tightened.
 - **Menu and docs aligned:** Delete currently appears before Archive; the Node requirement is now `^24.22.3 || >=26.13.1`.
-- **Verification upgraded:** `scripts/verify-safety.mjs` adds the safety regression suite, and `npm test` runs both suites.
+- **Verification upgraded:** `scripts/verify-safety.mjs` and `scripts/verify-client-layout.mjs` add safety and Client layout regression suites; `npm test` runs all three.
 - **Real-machine verification passed:** Windows Desktop + DSH `0.2.3-alpha.2`; a dedicated JSONL v4/zstd cold session completed delete → restore → delete again → permanent delete, log and cache hashes matched byte-for-byte, a live session was safely refused with `409` and no side effects, and all test data was removed.
 
 ### 0.7.9 (DSH 0.2.2-rc.5 adaptation + three data-safety fixes)

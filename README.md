@@ -40,7 +40,7 @@
 
 ## 兼容性
 
-- **0.8.0 适配 DeepSeek Harness `0.2.3-alpha.2`**，重点修复实时生命周期、定时任务可恢复性和存储后端识别。
+- **0.8.0 适配 DeepSeek Harness `0.2.3-alpha.2`**，重点修复实时生命周期、定时任务可恢复性、存储后端识别和侧栏按钮布局。
 - **支持范围**：默认 JSONL Session 后端与默认 sessions root 下的冷会话；投影缓存按默认 JSON storage 布局处理。冷子代理树会一并处理。
 - **安全拒绝**：存在 live Agent、未正常关闭的 live Session 或活动后台任务时返回 `409`；SQLite、未知 Session 后端或自定义 sessions root 同样拒绝操作。
 - **Node.js**：`^24.22.3 || >=26.13.1`，与 DSH `0.2.3-alpha.2` 要求一致。
@@ -139,20 +139,25 @@ npm test
 ```powershell
 node scripts/verify.mjs
 node scripts/verify-safety.mjs
+node scripts/verify-client-layout.mjs
 ```
 
-`verify.mjs` 覆盖基础删除/恢复/缓存/并发/对账/保留期与 Client 注册；`verify-safety.mjs` 覆盖实时会话拒绝、后端识别、定时任务暂停/恢复和事件契约。全部通过后再发版。
+`verify.mjs` 覆盖基础删除/恢复/缓存/并发/对账/保留期与 Client 注册；`verify-safety.mjs` 覆盖实时会话拒绝、后端识别、定时任务暂停/恢复和事件契约；`verify-client-layout.mjs` 锁定侧栏回收站按钮的宽栏与收起态布局。全部通过后再发版。
 
 ## 更新记录
 
 ### 0.8.0（适配 DSH 0.2.3-alpha.2 + 安全优先）
+
+- **恢复完整按钮宽度**：回收站插槽改为占满宿主底部 Flex 的剩余空间，不再按文字内容收缩；主题切换按钮保留自己的座位。
+- **收起态保持 36px**：侧栏折叠为 rail 时仍使用固定 36px 图标位，不参与宽栏拉伸。
+- **新增布局回归测试**：`npm test` 现在同时运行基础、安全和 Client 布局三组验证。
 
 - **仅处理冷会话**：检测到 live Agent、未正常关闭的 live Session 或活动子代理树时返回 `409`，不再用 `scope.dispose + store.delete` 绕过宿主完整生命周期。
 - **存储后端 fail-closed**：只支持默认 JSONL + 默认 storage root；SQLite、未知后端或自定义 root 会明确拒绝，避免假成功。
 - **定时任务可恢复**：移入回收站时暂停活动任务，恢复时重新启用；彻底删除才永久移除任务。
 - **事件与校验加固**：不再为冷会话伪造 `session/disposed`；补强 v4 header、子代理 `origin`、路径身份与深度检查。
 - **菜单与文档同步**：当前 Delete 位于 Archive 之前；Node 要求更新为 `^24.22.3 || >=26.13.1`。
-- **验证台升级**：新增 `scripts/verify-safety.mjs`，并可用 `npm test` 一次运行基础与安全回归。
+- **验证台升级**：新增 `scripts/verify-safety.mjs` 与 `scripts/verify-client-layout.mjs`，并可用 `npm test` 一次运行基础、安全与 Client 布局回归。
 - **真机验证通过**：Windows Desktop + DSH `0.2.3-alpha.2`，使用专用 JSONL v4/zstd 冷会话完成删除→恢复→再次删除→彻底删除；日志与缓存哈希逐字节一致，实时会话安全返回 `409` 且无副作用，测试数据零残留。
 
 ### 0.7.9（适配 DSH 0.2.2-rc.5 + 三处数据安全修复）
