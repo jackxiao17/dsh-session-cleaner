@@ -81,7 +81,7 @@
 - **定时任务可逆性**：活动任务在 trash 时暂停、restore 时恢复；如果任务是一次性且已过执行时间，宿主可能无法恢复原执行语义，此时会明确提示。purge 才永久删除任务。
 - **恢复不保证与删除前逐字节相同**：归档会话仍回到归档列表；原锚点会话已被删除时，恢复后停在侧栏顶部并如实回报。
 - **同 id 有两份日志目录时拒绝操作**：插件会列出路径，避免删一份、留另一份却报成功。
-- **崩溃安全**：快照先写、文件后搬；启动时双向对账，未搬完的条目按全有或全无回滚，孤儿目录收编为“数据不完整”条目。
+- **崩溃安全**：快照先写、文件后搬；启动时双向对账，未搬完的条目按全有或全无回滚；恢复途中若文件已回家而元数据未写完，会从快照续恢复缓存、工作区、置顶/归档与定时任务，而不是直接丢快照。
 - **0.7.0 移除了两个没人调用的 HTTP 端点**：`POST /delete` 与 `POST /status`。删除只有“移入回收站 → 彻底删除”一条链。
 - 实现使用跨平台 `node:fs` / `node:path` API；真机验证平台与结果以发版记录为准。
 
@@ -140,24 +140,27 @@ npm test
 node scripts/verify.mjs
 node scripts/verify-safety.mjs
 node scripts/verify-client-layout.mjs
+node scripts/verify-client-behavior.mjs
 ```
 
-`verify.mjs` 覆盖基础删除/恢复/缓存/并发/对账/保留期与 Client 注册；`verify-safety.mjs` 覆盖实时会话拒绝、后端识别、定时任务暂停/恢复和事件契约；`verify-client-layout.mjs` 锁定侧栏回收站按钮的宽栏与收起态布局。全部通过后再发版。
+`verify.mjs` 覆盖基础删除/恢复/缓存/并发/对账/保留期与 Client 注册；`verify-safety.mjs` 覆盖实时会话拒绝、后端识别、定时任务暂停/恢复、恢复崩溃续恢复和事件契约；`verify-client-layout.mjs` 锁定侧栏按钮布局；`verify-client-behavior.mjs` 锁定彻底删除/清空的逐项失败反馈。全部通过后再发版。
 
 ## 更新记录
 
 ### 0.8.0（适配 DSH 0.2.3-alpha.2 + 安全优先）
 
+- **修复恢复崩溃窗口**：文件已搬回但元数据未写完时，启动对账会从快照续恢复缓存、工作区、置顶/归档与定时任务；子会话部分恢复后可安全重试，父子按原顺序恢复；元数据未完整恢复时保留快照，原位与回收站出现重复副本时拒绝覆盖。
+- **彻底删除不再假成功**：前端逐项检查 `deleted`，批量删除或清空只要有一项失败就显示具体失败项，不再提示“已彻底删除/已清空”。
 - **恢复完整按钮宽度**：回收站插槽改为占满宿主底部 Flex 的剩余空间，不再按文字内容收缩；主题切换按钮保留自己的座位。
 - **收起态保持 36px**：侧栏折叠为 rail 时仍使用固定 36px 图标位，不参与宽栏拉伸。
-- **新增布局回归测试**：`npm test` 现在同时运行基础、安全和 Client 布局三组验证。
+- **新增布局与行为回归测试**：`npm test` 现在同时运行基础、安全、Client 布局和彻底删除反馈四组验证。
 
 - **仅处理冷会话**：检测到 live Agent、未正常关闭的 live Session 或活动子代理树时返回 `409`，不再用 `scope.dispose + store.delete` 绕过宿主完整生命周期。
 - **存储后端 fail-closed**：只支持默认 JSONL + 默认 storage root；SQLite、未知后端或自定义 root 会明确拒绝，避免假成功。
 - **定时任务可恢复**：移入回收站时暂停活动任务，恢复时重新启用；彻底删除才永久移除任务。
 - **事件与校验加固**：不再为冷会话伪造 `session/disposed`；补强 v4 header、子代理 `origin`、路径身份与深度检查。
 - **菜单与文档同步**：当前 Delete 位于 Archive 之前；Node 要求更新为 `^24.22.3 || >=26.13.1`。
-- **验证台升级**：新增 `scripts/verify-safety.mjs` 与 `scripts/verify-client-layout.mjs`，并可用 `npm test` 一次运行基础、安全与 Client 布局回归。
+- **验证台升级**：新增 `scripts/verify-safety.mjs`、`scripts/verify-client-layout.mjs` 与 `scripts/verify-client-behavior.mjs`，并可用 `npm test` 一次运行基础、安全、Client 布局与批量删除反馈回归。
 - **真机验证通过**：Windows Desktop + DSH `0.2.3-alpha.2`，使用专用 JSONL v4/zstd 冷会话完成删除→恢复→再次删除→彻底删除；日志与缓存哈希逐字节一致，实时会话安全返回 `409` 且无副作用，测试数据零残留。
 
 ### 0.7.9（适配 DSH 0.2.2-rc.5 + 三处数据安全修复）

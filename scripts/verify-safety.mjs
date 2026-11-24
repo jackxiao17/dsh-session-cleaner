@@ -3,7 +3,7 @@
 // 每个用例再创建独立子目录；无论通过或失败，最外层 finally 都会递归清理。
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -700,6 +700,208 @@ try {
     expectCondition(problems, host.calls.stopSessionTasks.length === 0, "调用了 stopSessionTasks");
     assertNoProblems(problems);
   }));
+
+  console.log("\n[2c] 恢复途中的崩溃窗口必须续恢复元数据");
+  await test("主会话文件已搬回但元数据未恢复：启动对账必须补回缓存、槽位、置顶与定时任务", async () => {
+    const fixture = await createFixture();
+    let host = makeHost(fixture, { schedules: [activeSchedule()] });
+    host.globalState.pinnedSessionIds.push(SID);
+    mod.apply(host.ctx);
+    try {
+      const trashed = await call(host, "POST", "/trash", { sessionId: SID });
+      assert.equal(trashed.status, 200, `trash 应成功，实际 ${trashed.status}: ${JSON.stringify(trashed.body)}`);
+      const metaBefore = JSON.parse(await readFile(metaPath(fixture, SID), "utf8"));
+      assert.equal(typeof metaBefore.projcacheRow, "string", "测试快照应保留投影缓存原文");
+      assert.equal(host.schedules.find(row => row.id === SCHEDULE_ID)?.status, "paused", "trash 后任务应暂停");
+
+      // 模拟 reinstateSession 已把文件搬回，但尚未写缓存/挂槽位/恢复置顶与任务就崩溃。
+      await rename(itemPath(fixture, SID), sessionDir(fixture, SID));
+      const pausedSchedules = clone(host.schedules);
+      host.dispose();
+
+      host = makeHost(fixture, { schedules: pausedSchedules });
+      host.slots.splice(host.slots.indexOf(SID), 1);
+      mod.apply(host.ctx);
+      await new Promise(resolve => setTimeout(resolve, 120));
+
+      assert.equal(await readIfPresent(cachePath(fixture, SID)), metaBefore.projcacheRow, "启动对账后投影缓存应恢复");
+      assert.equal(host.slots.includes(SID), true, "启动对账后工作区槽位应恢复");
+      assert.equal(host.globalState.pinnedSessionIds.includes(SID), true, "启动对账后置顶状态应恢复");
+      assert.equal(host.schedules.find(row => row.id === SCHEDULE_ID)?.status, "active", "启动对账后定时任务应恢复 active");
+      assert.equal(existsSync(metaPath(fixture, SID)), false, "元数据续恢复完成后才应撤掉快照");
+    } finally {
+      host.dispose();
+    }
+  });
+
+  await test("子会话已搬回但父会话仍在回收站：重试恢复必须识别已回家的子会话并续恢复", async () => {
+    const fixture = await createFixture();
+    const childHeader = makeHeader(CHILD, { parentSession: SID, origin: "subagent", delegationDepth: 1 });
+    const child = await fixture.createSession(CHILD, childHeader);
+    const childSchedule = {
+      ...activeSchedule("schedule-safety-child"),
+      target: { kind: "session", sessionId: CHILD },
+      involvedSessionIds: [CHILD]
+    };
+    let host = makeHost(fixture, { schedules: [childSchedule] });
+    mod.apply(host.ctx);
+    try {
+      const trashed = await call(host, "POST", "/trash", { sessionId: SID });
+      assert.equal(trashed.status, 200, `trash 应成功，实际 ${trashed.status}: ${JSON.stringify(trashed.body)}`);
+      const metaBefore = JSON.parse(await readFile(metaPath(fixture, SID), "utf8"));
+      const childMeta = metaBefore.descendants.find(row => row.id === CHILD);
+      assert.equal(typeof childMeta?.projcacheRow, "string", "子会话快照应保留投影缓存原文");
+      assert.equal(host.schedules.find(row => row.id === childSchedule.id)?.status, "paused", "子会话任务应暂停");
+
+      // 模拟子会话已搬回，父会话尚未搬回时崩溃。
+      await rename(join(itemPath(fixture, SID), ".children", CHILD), child.dir);
+      const pausedSchedules = clone(host.schedules);
+      host.dispose();
+
+      host = makeHost(fixture, { schedules: pausedSchedules });
+      host.slots.splice(host.slots.indexOf(SID), 1);
+      mod.apply(host.ctx);
+      await new Promise(resolve => setTimeout(resolve, 120));
+
+      const emptied = await call(host, "POST", "/trash/empty");
+      assert.equal(emptied.status, 200, `empty 接口应返回 200，实际 ${emptied.status}: ${JSON.stringify(emptied.body)}`);
+      assert.equal(emptied.body?.result?.results?.[0]?.deleted, false, "部分恢复的家庭不能被清空");
+      assert.match(emptied.body?.result?.results?.[0]?.error ?? "", /恢复|restore/i, "应提示检测到未完成的恢复");
+      assert.equal(existsSync(itemPath(fixture, SID)), true, "拒绝清空时父会话回收站副本必须保留");
+      assert.equal(existsSync(cachePath(fixture, CHILD)), true, "拒绝清空时已回家子会话缓存必须保留");
+      assert.equal(host.schedules.find(row => row.id === childSchedule.id)?.status, "active", "拒绝清空时已回家子会话任务必须保留");
+      assert.equal(existsSync(metaPath(fixture, SID)), true, "拒绝清空时快照必须保留");
+
+      const restored = await call(host, "POST", "/trash/restore", { sessionId: SID });
+      assert.equal(restored.status, 200, `部分恢复后重试应成功，实际 ${restored.status}: ${JSON.stringify(restored.body)}`);
+      assert.equal(existsSync(sessionDir(fixture, SID)), true, "父会话应恢复");
+      assert.equal(existsSync(child.dir), true, "子会话应保持已恢复状态");
+      assert.equal(await readIfPresent(child.artifact), child.content, "子会话工件内容应完整");
+      assert.equal(await readIfPresent(cachePath(fixture, CHILD)), childMeta.projcacheRow, "子会话缓存应续恢复");
+      assert.equal(host.schedules.find(row => row.id === childSchedule.id)?.status, "active", "子会话定时任务应续恢复");
+      assert.equal(existsSync(metaPath(fixture, SID)), false, "恢复完成后快照应清除");
+    } finally {
+      host.dispose();
+    }
+  });
+
+  await test("元数据续恢复失败时保留快照，故障解除后可通过 restore 端点继续", async () => {
+    const fixture = await createFixture();
+    let host = makeHost(fixture, { schedules: [activeSchedule()] });
+    mod.apply(host.ctx);
+    try {
+      const trashed = await call(host, "POST", "/trash", { sessionId: SID });
+      assert.equal(trashed.status, 200, `trash 应成功，实际 ${trashed.status}: ${JSON.stringify(trashed.body)}`);
+      await rename(itemPath(fixture, SID), sessionDir(fixture, SID));
+      const pausedSchedules = clone(host.schedules);
+      host.dispose();
+
+      // 让投影缓存目录不可写，制造“文件已回家、元数据续恢复失败”的状态。
+      await rm(fixture.cacheRoot, { recursive: true, force: true });
+      await writeFile(fixture.cacheRoot, "blocked-cache-root");
+      host = makeHost(fixture, { schedules: pausedSchedules });
+      host.slots.splice(host.slots.indexOf(SID), 1);
+      mod.apply(host.ctx);
+      await new Promise(resolve => setTimeout(resolve, 120));
+      assert.equal(existsSync(metaPath(fixture, SID)), true, "元数据未完整恢复时不能删除唯一快照");
+
+      const blockedRetry = await call(host, "POST", "/trash/restore", { sessionId: SID });
+      assert.equal(blockedRetry.status, 409, `缓存仍故障时 restore 应返回 409，实际 ${blockedRetry.status}: ${JSON.stringify(blockedRetry.body)}`);
+      assert.equal(blockedRetry.body?.code, "restore-incomplete", "部分恢复失败应返回 restore-incomplete");
+      assert.equal(existsSync(metaPath(fixture, SID)), true, "restore 重试失败时必须保留快照");
+      assert.equal(existsSync(cachePath(fixture, SID)), false, "restore 重试失败时不应伪报缓存已恢复");
+
+      await rm(fixture.cacheRoot, { force: true });
+      await mkdir(fixture.cacheRoot, { recursive: true });
+      const restored = await call(host, "POST", "/trash/restore", { sessionId: SID });
+      assert.equal(restored.status, 200, `故障解除后 restore 应继续完成，实际 ${restored.status}: ${JSON.stringify(restored.body)}`);
+      assert.equal(existsSync(cachePath(fixture, SID)), true, "restore 端点应补回投影缓存");
+      assert.equal(host.slots.includes(SID), true, "restore 端点应补回工作区槽位");
+      assert.equal(host.schedules.find(row => row.id === SCHEDULE_ID)?.status, "active", "restore 端点应恢复定时任务");
+      assert.equal(existsSync(metaPath(fixture, SID)), false, "续恢复完成后才应清除快照");
+    } finally {
+      host.dispose();
+    }
+  });
+
+  await test("清空回收站遇到未完成的恢复：必须保留快照，不能当作残留记录删掉", async () => {
+    const fixture = await createFixture();
+    let host = makeHost(fixture, { schedules: [activeSchedule()] });
+    mod.apply(host.ctx);
+    try {
+      const trashed = await call(host, "POST", "/trash", { sessionId: SID });
+      assert.equal(trashed.status, 200, `trash 应成功，实际 ${trashed.status}: ${JSON.stringify(trashed.body)}`);
+      await rename(itemPath(fixture, SID), sessionDir(fixture, SID));
+      const pausedSchedules = clone(host.schedules);
+      host.dispose();
+
+      await rm(fixture.cacheRoot, { recursive: true, force: true });
+      await writeFile(fixture.cacheRoot, "blocked-cache-root");
+      host = makeHost(fixture, { schedules: pausedSchedules });
+      host.slots.splice(host.slots.indexOf(SID), 1);
+      mod.apply(host.ctx);
+      await new Promise(resolve => setTimeout(resolve, 120));
+      assert.equal(existsSync(metaPath(fixture, SID)), true, "启动对账应保留未完成恢复的快照");
+
+      const emptied = await call(host, "POST", "/trash/empty");
+      assert.equal(emptied.status, 200, `empty 接口应返回 200，实际 ${emptied.status}: ${JSON.stringify(emptied.body)}`);
+      assert.equal(emptied.body?.result?.results?.[0]?.deleted, false, "未完成恢复不能被清空");
+      assert.match(emptied.body?.result?.results?.[0]?.error ?? "", /恢复|restore/i, "应明确提示恢复尚未完成");
+      assert.equal(existsSync(metaPath(fixture, SID)), true, "清空失败时必须保留唯一快照");
+      assert.equal(existsSync(cachePath(fixture, SID)), false, "缓存仍故障时不应伪报已恢复");
+    } finally {
+      host.dispose();
+    }
+  });
+
+  await test("原位与回收站同时存在同名会话：必须拒绝覆盖并保留回收站副本", async () => {
+    const fixture = await createFixture();
+    const host = makeHost(fixture);
+    mod.apply(host.ctx);
+    try {
+      const entry = fixture.sessions.get(SID);
+      const trashed = await call(host, "POST", "/trash", { sessionId: SID });
+      assert.equal(trashed.status, 200, `trash 应成功，实际 ${trashed.status}: ${JSON.stringify(trashed.body)}`);
+      await mkdir(entry.dir, { recursive: true });
+      await writeFile(entry.artifact, entry.content);
+
+      const restored = await call(host, "POST", "/trash/restore", { sessionId: SID });
+      assert.equal(restored.status, 409, `重复副本应返回 409，实际 ${restored.status}: ${JSON.stringify(restored.body)}`);
+      assert.equal(restored.body?.code, "target-exists", "重复副本应返回 target-exists");
+      assert.equal(existsSync(itemPath(fixture, SID)), true, "拒绝时回收站副本必须保留");
+      assert.equal(await readIfPresent(entry.artifact), entry.content, "拒绝时原位工件必须保留");
+      assert.equal(existsSync(metaPath(fixture, SID)), true, "拒绝时快照必须保留");
+    } finally {
+      host.dispose();
+    }
+  });
+
+  await test("父子会话均已回家时，启动对账按子→父顺序恢复工作区槽位", async () => {
+    const fixture = await createFixture();
+    const childHeader = makeHeader(CHILD, { parentSession: SID, origin: "subagent", delegationDepth: 1 });
+    const child = await fixture.createSession(CHILD, childHeader);
+    const anchor = "session-order-anchor";
+    let host = makeHost(fixture);
+    host.slots.splice(0, host.slots.length, SID, CHILD, anchor);
+    mod.apply(host.ctx);
+    try {
+      const trashed = await call(host, "POST", "/trash", { sessionId: SID });
+      assert.equal(trashed.status, 200, `trash 应成功，实际 ${trashed.status}: ${JSON.stringify(trashed.body)}`);
+      await rename(join(itemPath(fixture, SID), ".children", CHILD), child.dir);
+      await rename(itemPath(fixture, SID), sessionDir(fixture, SID));
+      await rm(join(sessionDir(fixture, SID), ".children"), { recursive: true, force: true });
+      host.dispose();
+
+      host = makeHost(fixture);
+      host.slots.splice(0, host.slots.length, anchor);
+      mod.apply(host.ctx);
+      await new Promise(resolve => setTimeout(resolve, 120));
+      assert.equal(JSON.stringify(host.slots), JSON.stringify([SID, CHILD, anchor]), "父子槽位应按删除前顺序恢复");
+      assert.equal(existsSync(metaPath(fixture, SID)), false, "顺序恢复完成后快照应清除");
+    } finally {
+      host.dispose();
+    }
+  });
 
   console.log("\n[3] sessionPersistence 后端与路径必须 fail closed");
   const backendCases = [

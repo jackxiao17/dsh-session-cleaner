@@ -790,7 +790,7 @@ console.log("\n[9] 客户端 bundle（slot 注册与语言包）");
   eq(overlayCount, 2, "shell.overlay 注册了 toast 与回收站面板两个");
   eq(dictionaries.length, 1, "注册了一份语言包");
   const zh = dictionaries[0].dicts.zh, en = dictionaries[0].dicts.en;
-  for (const key of ["trash.restored", "trash.restoredArchived", "trash.restoredMixed", "trash.purged", "toast.trashed", "toast.sessionActive", "toast.backendUnsupported", "menu.delete"]) {
+  for (const key of ["trash.restored", "trash.restoredArchived", "trash.restoredMixed", "trash.purged", "trash.partialFailure", "trash.failureInvalid", "trash.failureEmpty", "trash.failureUnknown", "trash.failureNotDeleted", "toast.trashed", "toast.sessionActive", "toast.backendUnsupported", "menu.delete"]) {
     ok(typeof zh[key] === "string" && zh[key] !== "", `中文语言包有 ${key}`);
     ok(typeof en[key] === "string" && en[key] !== "", `英文语言包有 ${key}`);
   }

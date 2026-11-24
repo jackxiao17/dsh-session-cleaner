@@ -81,7 +81,7 @@ Grab the latest archive from the [Releases page](https://github.com/jackxiao17/d
 - **Schedule reversibility:** active tasks are paused on delete and restored on restore. A one-shot task whose execution time has already passed may not recover its original timing semantics; the UI reports that explicitly. Permanent delete removes tasks for good.
 - **Restore is not guaranteed to be byte-identical:** archived sessions still return to the archive; if the original anchor was deleted, the session returns to the top of the sidebar and the result says so.
 - **Two log directories for the same id are refused:** paths are listed so one copy is not deleted while another survives behind a success result.
-- **Crash safety:** the snapshot is written before the move; startup reconciles both halves, rolls an incomplete move back all-or-nothing, and adopts orphan directories as “data incomplete” entries.
+- **Crash safety:** the snapshot is written before the move; startup reconciles both halves and rolls incomplete moves back all-or-nothing. If a restore brought files home before metadata finished, startup resumes cache, workspace, pin/archive and schedule restoration from the snapshot instead of discarding it.
 - **0.7.0 removed two HTTP endpoints nobody called:** `POST /delete` and `POST /status`. Deletion now has one path: move to the bin → delete forever.
 - The implementation uses cross-platform `node:fs` / `node:path` APIs; real-machine platforms and results are recorded in the release notes.
 
@@ -142,24 +142,27 @@ Or run the two maintainer scripts separately (they do not take part in the runti
 node scripts/verify.mjs
 node scripts/verify-safety.mjs
 node scripts/verify-client-layout.mjs
+node scripts/verify-client-behavior.mjs
 ```
 
-`verify.mjs` covers the core delete/restore/cache/locking/reconciliation/retention paths and Client registrations. `verify-safety.mjs` covers live-session refusal, backend detection, schedule pause/restore and event contracts. `verify-client-layout.mjs` locks the wide and collapsed sidebar footer layout. Release only after all three pass.
+`verify.mjs` covers the core delete/restore/cache/locking/reconciliation/retention paths and Client registrations. `verify-safety.mjs` covers live-session refusal, backend detection, schedule pause/restore, interrupted-restore recovery and event contracts. `verify-client-layout.mjs` locks the sidebar footer layout. `verify-client-behavior.mjs` locks per-item failure feedback for permanent delete and empty-bin operations. Release only after all four pass.
 
 ## Changelog
 
 ### 0.8.0 (DSH 0.2.3-alpha.2 + safety-first)
 
+- **Fixed the interrupted-restore crash window:** when files are home but metadata restoration did not finish, startup reconciliation resumes cache, workspace, pin/archive and schedule restoration from the snapshot. Partial child restores are retryable, family slots restore child-before-parent, incomplete metadata keeps the snapshot, and duplicate home/bin copies are refused instead of overwritten.
+- **Permanent delete no longer reports false success:** the Client checks every `deleted` result and reports the exact failed items if any delete or empty-bin operation is only partially complete.
 - **Restored the full button width:** the recycle-bin slot now fills the remaining space in the host footer Flex row instead of shrinking to its label, while the theme toggle keeps its own seat.
 - **Kept the 36px rail footprint:** the collapsed sidebar still uses a fixed 36px icon slot and does not stretch with the wide layout.
-- **Added a layout regression test:** `npm test` now runs the core, safety and Client layout suites.
+- **Added layout and behavior regressions:** `npm test` now runs core, safety, Client layout and permanent-delete feedback suites.
 
 - **Cold sessions only:** a live Agent, a Session that has not shut down cleanly, or an active subagent tree returns `409`; `scope.dispose + store.delete` is no longer used to bypass the host lifecycle.
 - **Fail-closed storage backends:** only the default JSONL backend and default storage root are supported; SQLite, unknown backends and custom roots are refused instead of producing false success.
 - **Reversible schedules:** active tasks are paused on delete and re-enabled on restore; only permanent delete removes them.
 - **Stronger events and validation:** cold sessions no longer emit a fabricated `session/disposed`; v4 headers, subagent `origin`, path identity and depth checks are tightened.
 - **Menu and docs aligned:** Delete currently appears before Archive; the Node requirement is now `^24.22.3 || >=26.13.1`.
-- **Verification upgraded:** `scripts/verify-safety.mjs` and `scripts/verify-client-layout.mjs` add safety and Client layout regression suites; `npm test` runs all three.
+- **Verification upgraded:** `scripts/verify-safety.mjs`, `scripts/verify-client-layout.mjs` and `scripts/verify-client-behavior.mjs` add safety, Client layout and batch-delete feedback regressions; `npm test` runs all four.
 - **Real-machine verification passed:** Windows Desktop + DSH `0.2.3-alpha.2`; a dedicated JSONL v4/zstd cold session completed delete → restore → delete again → permanent delete, log and cache hashes matched byte-for-byte, a live session was safely refused with `409` and no side effects, and all test data was removed.
 
 ### 0.7.9 (DSH 0.2.2-rc.5 adaptation + three data-safety fixes)
