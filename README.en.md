@@ -40,12 +40,12 @@ Grab the latest archive from the [Releases page](https://github.com/jackxiao17/d
 
 ## Compatibility
 
-- **0.8.0 targets DeepSeek Harness `0.2.3-alpha.2`**, with fixes for live lifecycle handling, reversible schedules, storage-backend detection and sidebar button layout.
+- **0.8.0 requires DeepSeek Harness `>=0.2.3-alpha.2 <0.3.0`**. The current real-machine verified version is `0.2.3-alpha.2`; this release fixes live lifecycle handling, reversible schedules, storage-backend detection and sidebar button layout.
 - **Supported:** cold sessions on the default JSONL Session backend and default sessions root; projection caches use the default JSON storage layout. Cold subagent trees are handled together.
 - **Fail-closed:** a live Agent, a Session that has not shut down cleanly, or an active background job returns `409`; SQLite, an unknown Session backend, or a custom sessions root is refused too.
 - **Node.js:** `^24.22.3 || >=26.13.1`, matching DSH `0.2.3-alpha.2`.
 - **Verification status:** automated commands are listed below; real-machine platforms, coverage and results are recorded in the corresponding release notes.
-- Earlier DSH versions are not individually verified and are not promised. After a major DSH upgrade, upgrade the plugin first if the menu disappears or an action reports an error; recycle-bin data remains under `~/.dsh/dsh-session-cleaner/trash/`.
+- **DSH `0.2.2` and earlier are not supported; `0.3.0` and later are not declared yet.** After a major DSH upgrade, upgrade the plugin first if the menu disappears or an action reports an error; recycle-bin data remains under `~/.dsh/dsh-session-cleaner/trash/`.
 
 ## Usage
 
@@ -161,7 +161,7 @@ node scripts/verify-client-behavior.mjs
 - **Fail-closed storage backends:** only the default JSONL backend and default storage root are supported; SQLite, unknown backends and custom roots are refused instead of producing false success.
 - **Reversible schedules:** active tasks are paused on delete and re-enabled on restore; only permanent delete removes them.
 - **Stronger events and validation:** cold sessions no longer emit a fabricated `session/disposed`; v4 headers, subagent `origin`, path identity and depth checks are tightened.
-- **Menu and docs aligned:** Delete currently appears before Archive; the Node requirement is now `^24.22.3 || >=26.13.1`.
+- **Menu and docs aligned:** Delete currently appears before Archive; the Node requirement is now `^24.22.3 || >=26.13.1`; the minimum supported DSH version is tightened to `>=0.2.3-alpha.2 <0.3.0`, and DSH 0.2.2 or earlier is no longer declared compatible.
 - **Verification upgraded:** `scripts/verify-safety.mjs`, `scripts/verify-client-layout.mjs` and `scripts/verify-client-behavior.mjs` add safety, Client layout and batch-delete feedback regressions; `npm test` runs all four.
 - **Real-machine verification passed:** Windows Desktop + DSH `0.2.3-alpha.2`; a dedicated JSONL v4/zstd cold session completed delete → restore → delete again → permanent delete, log and cache hashes matched byte-for-byte, a live session was safely refused with `409` and no side effects, and all test data was removed.
 

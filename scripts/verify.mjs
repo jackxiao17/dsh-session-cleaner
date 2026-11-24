@@ -820,10 +820,9 @@ console.log("\n[9b] 浮层拖拽区与旧格式工件");
   }
   ok(/\.scl-footerSlot\{[^}]*width:auto/.test(clientSource), ".scl-footerSlot 使用 width:auto 自适应宽度");
   const manifest = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8"));
-  // DSH 的 semver 校验启用 includePrerelease:true，因此该范围接受 0.2.3-alpha.2，
-  // 同时保留对 0.2.2-rc.2 及更高 0.2.x 版本的兼容声明。
-  eq(manifest.engines?.dsh, ">=0.2.2-rc.2 <0.3.0",
-    "package.json 保留 includePrerelease 语义下的 0.2.x 兼容范围");
+  // 最低版本与当前真机验证宿主对齐；旧版真机兼容测试暂不开展，不能继续声明支持。
+  eq(manifest.engines?.dsh, ">=0.2.3-alpha.2 <0.3.0",
+    "package.json 要求 DSH >=0.2.3-alpha.2 <0.3.0");
 }
 
 // ───────────────────────── 10. 截图声明与仓库一致性 ─────────────────────────

@@ -40,12 +40,12 @@
 
 ## 兼容性
 
-- **0.8.0 适配 DeepSeek Harness `0.2.3-alpha.2`**，重点修复实时生命周期、定时任务可恢复性、存储后端识别和侧栏按钮布局。
+- **0.8.0 要求 DeepSeek Harness `>=0.2.3-alpha.2 <0.3.0`**，当前真机验证版本为 `0.2.3-alpha.2`，重点修复实时生命周期、定时任务可恢复性、存储后端识别和侧栏按钮布局。
 - **支持范围**：默认 JSONL Session 后端与默认 sessions root 下的冷会话；投影缓存按默认 JSON storage 布局处理。冷子代理树会一并处理。
 - **安全拒绝**：存在 live Agent、未正常关闭的 live Session 或活动后台任务时返回 `409`；SQLite、未知 Session 后端或自定义 sessions root 同样拒绝操作。
 - **Node.js**：`^24.22.3 || >=26.13.1`，与 DSH `0.2.3-alpha.2` 要求一致。
 - **验证状态**：自动化测试命令见下文；真机验证平台、覆盖范围和结果以对应版本的发版记录为准。
-- 更早的 DSH 版本未逐项验证，不做兼容承诺。升级大版本后若出现菜单消失或操作报错，请先升级插件；回收站数据仍保存在 `~/.dsh/dsh-session-cleaner/trash/`。
+- **DSH `0.2.2` 及更早不在支持范围，`0.3.0` 及以后也尚未声明支持**。升级大版本后若出现菜单消失或操作报错，请先升级插件；回收站数据仍保存在 `~/.dsh/dsh-session-cleaner/trash/`。
 
 ## 用法
 
@@ -159,7 +159,7 @@ node scripts/verify-client-behavior.mjs
 - **存储后端 fail-closed**：只支持默认 JSONL + 默认 storage root；SQLite、未知后端或自定义 root 会明确拒绝，避免假成功。
 - **定时任务可恢复**：移入回收站时暂停活动任务，恢复时重新启用；彻底删除才永久移除任务。
 - **事件与校验加固**：不再为冷会话伪造 `session/disposed`；补强 v4 header、子代理 `origin`、路径身份与深度检查。
-- **菜单与文档同步**：当前 Delete 位于 Archive 之前；Node 要求更新为 `^24.22.3 || >=26.13.1`。
+- **菜单与文档同步**：当前 Delete 位于 Archive 之前；Node 要求更新为 `^24.22.3 || >=26.13.1`；DSH 最低支持版本收紧为 `>=0.2.3-alpha.2 <0.3.0`，不再声明兼容 0.2.2 及更早版本。
 - **验证台升级**：新增 `scripts/verify-safety.mjs`、`scripts/verify-client-layout.mjs` 与 `scripts/verify-client-behavior.mjs`，并可用 `npm test` 一次运行基础、安全、Client 布局与批量删除反馈回归。
 - **真机验证通过**：Windows Desktop + DSH `0.2.3-alpha.2`，使用专用 JSONL v4/zstd 冷会话完成删除→恢复→再次删除→彻底删除；日志与缓存哈希逐字节一致，实时会话安全返回 `409` 且无副作用，测试数据零残留。
 
